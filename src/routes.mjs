@@ -5,7 +5,7 @@
 // The context arrives fully built (plugins included) — makeRouter never
 // reassigns or guards it (E1).
 
-import { backingFor as defaultBackingFor, isFolderHost, EXT_MIME, validEntryName } from "./backings/index.mjs";
+import { backingFor as defaultBackingFor, EXT_MIME, validEntryName } from "./backings/index.mjs";
 import { capabilities, normalizeAddress, validateCollection, validateAttributes, sourceAttributes } from "./collections.mjs";
 import { sniffMime } from "./extractor.mjs";
 import { sourceOrigin, sameOrigin, expectedOrigin } from "./source-origin.mjs";
@@ -13,6 +13,8 @@ import { waitFor } from "./lifetime.mjs";
 import { isContentHash } from "./cache.mjs";
 import { isResourceRoot } from "./parameters.mjs";
 import { mediaKind } from "./backings/mime.mjs";
+import { deleteEntry } from "./entry-delete.mjs";
+import { deleteDownVoted } from "./delete-down-voted.mjs";
 
 // Byte routes name the resource root explicitly; absent keeps the historical
 // output meaning, an unknown root fails instead of falling back to another root.
@@ -316,10 +318,11 @@ export function makeRouter(ctx) {
     const items = url.searchParams.get('arrivals') === 'items-v1';
     return Response.json(url.searchParams.get("inventory") === "1"
       ? { revision: inventory.revision, generation: inventory.generation, coverage: inventory.coverage, subfolders: inventory.subfolders,
-          folders: inventory.folders, unavailable: inventory.unavailable, chronology: inventory.chronology, metaVersion,
+          folders: inventory.folders, unavailable: inventory.unavailable, skipped: inventory.skipped, chronology: inventory.chronology, metaVersion,
           ...(items ? { origin: sourceOrigin(id, ctx.sourceActivity.source(id)) } : {}),
           arrivals: arrivals ? { sequence: arrivals.sequence, latestVisibleSeq: arrivals.latestVisibleSeq,
-            ...(items ? { revision: arrivals.revision, visibleRanges: arrivals.visibleRanges } : {}) } : null, entries } : entries);
+            ...(items ? { revision: arrivals.revision, visibleRanges: arrivals.visibleRanges,
+              downVotedRanges: arrivals.downVotedRanges, upVotedRanges: arrivals.upVotedRanges } : {}) } : null, entries } : entries);
   });
 
   add("GET", "/api/collections/<id>/entries/<name>", async (_req, { id, name }) => {
@@ -364,27 +367,28 @@ export function makeRouter(ctx) {
 
   // Delete an entry from its source, per the collection's delete capability:
   // folder → unlink; comfy + assets_plus → trash; else hide + history cleanup.
-  add("DELETE", "/api/collections/<id>/entries/<name>", async (_req, { id, name }) => {
-    const addr = addressFor(id);
-    if (!addr) return Response.json({ error: "unknown collection" }, { status: 404 });
-    const c = ctx.store.collectionGet(id) ?? { id, kind: isFolderHost(addr) ? "folder" : "comfy", address: addr };
-    // DELETE probes too (cheap, cached by the assets-plus TTL): an
-    // unreachable host answers "hide" — try and report, never guess trash
-    const caps = await capabilities(c, {
-      online: await backingFor(addr).probe(addr),
-      useAssetsPlus: useAssetsPlus(),
-      comfy: ctx.comfy?.(id) ?? null,
-    });
-    const backing = backingFor(addr);
-    if (caps.delete === "unlink" || caps.delete === "trash") {
-      const res = await backing.remove(addr, name);
-      if (!res.ok) return Response.json({ error: res.detail }, { status: 409 });
-      ctx.store.arrivals.remove(id, name);
-      return Response.json({ deleted: true, mode: res.mode });
+  add("POST", "/api/collections/<id>/delete-down-voted", async (req, { id }) => {
+    const address = addressFor(id);
+    if (!address) return Response.json({ error: "unknown collection" }, { status: 404 });
+    let body;
+    try { body = await readJson(req); }
+    catch (error) {
+      if (error instanceof UnsupportedMediaType) throw error;
+      return Response.json({ error: "JSON body: {preview: true} or {names: [...]}" }, { status: 400 });
     }
-    ctx.store.entryHide(id, name);
-    const historyCleared = (await backing.historyDelete?.(addr, name)) ?? false;
-    return Response.json({ deleted: true, mode: "hide", historyCleared });
+    if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 1 ||
+      !(body.preview === true || Array.isArray(body.names) && body.names.every(name => validEntryName(address, name)))) {
+      return Response.json({ error: "Expected {preview: true} or {names: [valid entry names]}" }, { status: 400 });
+    }
+    const originError = byteOriginError(req, id);
+    if (originError) return originError;
+    const result = await deleteDownVoted(ctx, id, body);
+    return Response.json(result.body, { status: result.status });
+  });
+
+  add("DELETE", "/api/collections/<id>/entries/<name>", async (_req, { id, name }) => {
+    const result = await deleteEntry(ctx, id, name);
+    return Response.json(result.body, { status: result.status });
   });
 
   add("HEAD", "/api/collections/<id>/entries/<name>/bytes", async (req, { id, name }, url) => {

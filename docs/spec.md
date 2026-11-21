@@ -45,6 +45,7 @@ the resources; a collection's `capabilities` answer what its backing can do.
 | `/api/collections/<id>/entries/<name>/meta` | GET | one shown entry's record `{name, hash, extracted, meta, width, height, generationTimeMs}`, independent of the delta stream; an entry without a hash is first ingested through the single-flight high lane for at most 8 s; `extracted:false` means not available yet (unreadable source or the wait elapsed); nullable generation timing is described below |
 | `/api/collections/<id>/entries` | POST | multipart upload into the input dir; **409 with the conflicting name, never an overwrite** |
 | `/api/collections/<id>/entries/<name>` | DELETE | per capability: folder → unlink; comfy + assets_plus → trash; otherwise → hide + history cleanup |
+| `/api/collections/<id>/delete-down-voted` | POST | `{preview:true}` returns `{count,names,capability}` for currently listed output entries in all folders with vote down, excluding favorite/bookmark/hidden/gone. `{names:[...]}` sequentially deletes only those names through the same entry delete owner, rechecking live eligibility immediately before effects; returns `{deleted:[name],skipped:[{name,reason}],failed:[{name,error}]}`. Optional expected source origin fences replacement; ordinary mutation/JSON/path admission applies. |
 | `/api/collections/<id>/entries/<name>/bytes` | GET | cache-first bytes of one resource root: absent `kind` or `output` (the feed entry), `?kind=input` or `?kind=temp` (referenced files); an unknown `kind` is 400, never another root. ETag is the content hash, `Cache-Control: no-cache`; single-byte ranges (§Serve path). HEAD uses the same root and reports the content length |
 | `/api/collections/<id>/entries/<name>/bytes` | HEAD | 404 when the entry's bytes are unknown, else `content-length` |
 | `/api/collections/<id>/entries/<name>/judgment` | PATCH | whitelisted fields (`vote`/`favorite`/`bookmark`/`notes`/`plugins.<ns>.*`), defaults deep-pruned, one statement |
@@ -69,6 +70,16 @@ child is a read-only identity footer, after all settings/feature rows and outsid
 their search filter: `Kosmozoo <formatted version>` or `Kosmozoo` while unknown.
 It remains visible when no rows match. The header image and wordmark have no
 native title. No loaded-client identity, asset update or reload protocol is implied.
+
+Settings offers `Delete down-voted images from <current source> source`, following
+the header's selection. Its engine-owned preview opens the shared confirmation
+dialog with the real count and trash/unlink/hide explanation. Starred and
+bookmarked entries are always kept; zero matches offers Cancel only. Cancel has
+no delete effect. Confirm captures exactly the previewed names/source, replaces
+actions with status while pending, updates the feed through the existing deletion
+projection and reports deleted/skipped/failed counts once. Transport uncertainty
+requires a new explicit preview, never automatic destructive replay. No preference
+or browser storage is added, and feed folder/filter/selection do not narrow it.
 
 Entry identity on the wire is the plain name under a collection; the
 `collection:name` string survives only inside the client as a derived
@@ -100,8 +111,10 @@ unchanged. Encode the entire name as **one** URL segment, for example
 `/api/collections/fake/entries/a%2Fimage.png/bytes`. Router captures decode once;
 literal `%2F` text is not recursively decoded into another path. Canonical Comfy
 paths reject absolute/drive-absolute paths, backslashes, empty/repeated/trailing
-segments, exact `.`/`..` segments and controls; ordinary percent, colon, hash,
-spaces and Unicode retain their exact identity. Local folder names keep their
+segments, exact `.`/`..` segments and NUL. Other control characters, including
+line breaks, carriage returns and tabs, are ordinary exact filename data, as are
+percent, colon, hash, spaces and Unicode. Listing suffix parsing handles those
+names without treating a line break as the end of a record. Local folder names keep their
 existing flat basename grammar. Named-entry and direct Ingest validation precedes
 cache/store/backing access. Comfy reads, HEAD/range/stat, input references and
 deletion split path into transport `subfolder` and leaf `filename` only at the
@@ -109,13 +122,13 @@ backing boundary. Hide-history matching also includes output type and directory.
 
 Canonical Comfy names are bounded to 4096 JavaScript string code units and 128
 slash-separated components, including the leaf filename. Over-limit names are
-invalid records: the complete inventory fails closed and retains its prior
-accepted snapshot. These per-name bounds are separate from the aggregate budget
+invalid records: they are excluded and counted without rejecting valid siblings.
+These per-name bounds are separate from the aggregate budget
 of 16,777,216 JavaScript string code units for unique ancestor folder strings.
 
 ### Output inventory and folder scope
 
-`?inventory=1` returns `{revision, generation, coverage, subfolders, folders, entries, unavailable, chronology, arrivals, metaVersion}`.
+`?inventory=1` returns `{revision, generation, coverage, subfolders, folders, entries, unavailable, skipped, chronology, arrivals, metaVersion}`.
 `metaVersion` is the metadata version the entries' rows reflect (read with them, in one turn).
 `revision` is an ephemeral address-owner epoch plus scan revision; `coverage` is
 `recursive` or `root-only`; `subfolders` is `{supported, reason}`. `folders`
@@ -138,8 +151,21 @@ using deterministic string comparison. Zero/pre-epoch times are valid; HTTP seco
 are not exact subsecond generation order, and timestamps never come from ETag,
 history, observation time or cache maxima. AssetsPlus-only hidden root files
 remain visible, as explicitly approved; Kosmozoo's own hidden/gone overlay and
-AssetsPlus descendant hiding remain honored. Whole responses validate before publication;
-conflicting duplicates, malformed records and truncation are errors. Definitive
+AssetsPlus descendant hiding remain honored. The complete envelope validates before
+publication; a malformed envelope or truncated scan is an error. Individual malformed
+records are excluded, never normalized into another name. Conflicting duplicate
+identities are excluded altogether, counting every conflicting occurrence; identical
+duplicates still deduplicate. `skipped:{count,reasons:[{reason,count}]}` retains the
+omitted-record total and counted reason categories in the immutable snapshot. A
+nonzero selected-source count renders a persistent warning:
+`N files could not be listed: <reason> (<count>) (<source>)`. Refresh replaces it,
+successful recovery clears it, and source navigation cannot carry it to another
+source. Non-media stock files are not inventory candidates and are not omissions.
+Feed, Details, anchors and shared single-line labels replace line breaks and tabs
+with spaces for display only; native titles retain exact text. Resource URLs,
+filtering, SQL, metadata, judgment, deletion and Variations references keep the raw
+identity. Downloads request exact bytes but retain the existing portable suggested
+filename projection, never raw control characters in HTTP headers. Definitive
 extension absence permits explicit stock-root coverage without a folder
 control. Unknown capability also omits that control until resolved. A known
 recursive host's outage/incompatible response cannot downgrade
@@ -194,7 +220,10 @@ carry `arrivalSeq`. Default inventories and source events retain the exact legac
 `{sequence,latestVisibleSeq}` projection, or null before the first accepted inventory.
 
 `arrivals=items-v1` opts the existing inventory request and single EventSource into
-`{sequence,latestVisibleSeq,revision,visibleRanges}`. Ranges are canonical inclusive
+`{sequence,latestVisibleSeq,revision,visibleRanges,downVotedRanges,upVotedRanges}`.
+Vote ranges are disjoint subsets of visible membership and update on committed
+judgment changes without assigning new sequences. Legacy item frames without vote
+ranges remain valid and imply empty vote ranges. Ranges are canonical inclusive
 positive integer pairs: dense, ascending, disjoint, nonadjacent and within sequence.
 `latestVisibleSeq` is their maximum, or zero when empty. Missing/hidden/gone outputs
 are excluded. Lower-member removal changes revision even when the maximum stays
@@ -203,8 +232,8 @@ atomically. Opted-in inventory includes shared `origin` (source/address/kind/
 incarnation). Its entries, visibility overlay and arrival projection synchronously
 use the token's latest accepted snapshot after the awaited inventory read.
 
-Inventory/removal and committed hide/gone boundaries refresh immutable membership
-and its cached JSON fragment using name-only exclusions. Jobs progress never walks
+Inventory/removal and committed hide/gone/judgment boundaries refresh immutable membership
+and its cached JSON fragment using name-only exclusions and narrow output vote facts. Jobs progress never walks
 names, metadata or interval arrays. Demand-only event encoding keeps chunks at most
 16384 bytes and one active plus latest pending immutable frame. Fragmented membership
 has O(intervals) payload, not constant size. Legacy and opted-in delivery share the
@@ -225,7 +254,13 @@ pagehide disconnects native observation, pageshow rebinds, and replacement/dispo
 retired callbacks. Store tickets also fence source/session/name/sequence/known-content
 and native resource retirement. First-hash enrichment preserves the same content.
 
-Source pills, picker rows, persistent rail segments and favicon consume that one ledger,
+Source pills, picker rows, persistent rail segments and favicon consume one eligible
+attention projection from that ledger: raw unseen intersected with the shared judgment
+visibility policy and live session preferences, including unselected sources. Markers
+count only images the feed would show under that judgment policy; feed search/folder
+scope does not suppress source attention. Hiding never acknowledges an item: reveal,
+disabling down-vote hiding or changing its vote restores still-unseen attention.
+All surfaces share that projection,
 including selected and unpinned sources. Reload starts quiet; no read state is persisted
 or written to the engine. Source attention uses `--attention` and shared "New images."
 wording, without pulsing/layout change. For a current source, only its name turns
@@ -336,8 +371,8 @@ The Variations summary places a smaller two-line `Estimated time:` block next to
 its dominant count. Multiply each known captured original-image duration by the
 preview's per-image job count and sum. Complete timing coverage displays e.g.
 `12m`; partial coverage displays `above 12m`; no usable time/count displays `--`.
-Bulk retains its existing first-image count estimate, so time is a workload
-estimate based on that same displayed count, not a queue ETA or backend scheduler.
+Each admitted target contributes its own engine-planned count; leftovers contribute
+no time. This is a workload estimate, not a queue ETA or backend scheduler.
 Edited parameters can change speed; independent backends may execute concurrently.
 
 The private editor owns captured timing facts and one abortable acquisition of
@@ -354,7 +389,8 @@ thumbnail, filename, original generation duration (or `--`) and remove action.
 This is the target cohort, not a Load Image candidate set. Removing affects only
 this editor; the main gallery selection, image files and saved runs are untouched.
 Count/time and the next Run capture use exactly the remaining targets, in order.
-The strip disappears at one remaining image. Removal keeps raw edits and the
+The strip disappears at one remaining image unless it has a problem to highlight.
+Removal keeps raw edits and the
 opening workflow/range basis, participates in dirty/revision/close protection,
 and is unavailable while Run or a blocking decision owns the editor. Issued Run
 tickets stay immutable. Lazy thumbnails use the existing display owner; timing
@@ -366,6 +402,29 @@ basis, independently of cardinality: `single` requires exactly one target;
 `bulk` allows one or more. Shrinking a batch never reinterprets existing ranges.
 Original saved-run openings restore that explicit basis. No schema migration or
 modification of existing saved runs is required.
+
+#### Stable Variations summary
+
+The Variations summary reserves a three-line status slot and a separate fixed
+Run row, shared by Run and submission progress. Count/time, breakdown and Example
+allocations do not resize with edits or status changes. Long status text clamps
+visually but remains complete in the DOM, native title and polite live region;
+catalogue Retry remains available. The summary body scrolls independently in
+short viewports. These presentation slots do not change preview or Run admission.
+
+The feature's shared `problems.mjs` contract retains a stable code, severity,
+phase, target/parameter identity, numeric and effect facts, message and recovery
+action. HTTP errors and partial successful envelopes preserve that structure
+alongside legacy strings. One editor-owned projection supplies summary, field
+and target feedback; current blockers precede prior Run results and warnings.
+Problem updates invalidate editor derivations before publishing, and changing
+the surviving cohort retires its count plan before any synchronous publication.
+History projects confirmed, partial, unknown, unsent and body-written counts
+from the current permutation journal, not an optimistic or saved summary count.
+Body-written progress alone never confirms queue acceptance or permits replay.
+Count-only pending-upload identities never become output filenames. The naming
+example projects those identities to a display placeholder, while actual graph
+writes and final output validation retain receipt-backed resource names.
 
 #### Run destination ("Run on")
 
@@ -394,8 +453,9 @@ their original descriptors. Same-host review keeps both lists empty.
 Conflicting cards appear first in the catalogue in red ink; clicking one adds it
 to the editors. Value conflicts offer one-click closest replacements; a picked
 value the destination lacks stays listed in red so it can be unpicked. Until the
-destination catalogue arrives, and while any conflict is unresolved, Run sends
-nothing and says why. History capture accepts an optional `destination`
+destination catalogue and cohort plan arrive, Run sends nothing and says why.
+Conflicts exclude only affected targets; Run is available when any target has work.
+History capture accepts an optional `destination`
 (a ComfyUI origin) stored in the saved document; uploads, planning and enqueue
 bind to it (older captures default to the target's own source). The target image
 and Load Image inputs are archived first, so the original backend need not be
@@ -415,15 +475,43 @@ zero work. Enabled-empty or invalid axes are not the identity tuple and still
 reject. Existing output naming/narrowing, archived input materialization and final
 graph validation remain in force.
 
-After sealing the archive, preflight rejects configurations known to produce no
-work before any upstream resource materialization. In bulk, an individually
-zero-count target does not veto other potentially productive targets at this
-early stage. Unresolved transfers remain unknown here: estimated upload names
-cannot reject a recipe or authorize a graph assignment. Actual receipt-backed
-target planning and independent final-write coverage still own final admission.
-Each target's materialization/planning gate also rejects a known-zero target
-before its own resource effects; aggregate potential never authorizes a no-op
-target's upload.
+`cohort-plan.mjs` is the engine's one effect-free workload planner. Each target's
+own graph and destination-aware catalogue pass through the shared raw compiler,
+applicability, relative-range resolution and tuple kernel. The result is ordered
+`[{index,count,problem:null|{code,message}}]`: no work, more than the shared `MAX_JOBS_PER_IMAGE` jobs per
+target, traversal budgets, missing carriers/classes or incompatible values exclude
+only that target. An over-limit target retains its exact workload `count` with a
+`too-many` problem; it is not admitted. Other failures without a count use zero
+and always supply a nonempty reason. Unmaterialized image resources are identities, not predicted
+receipt names or graph assignments. Preview is debounced, latest-only and aborted
+on close; it cannot change recipe edits or dirty state. The displayed exact total
+is the sum of known workload counts, including over-limit work. Over-limit counts
+are marked, never replaced by zero. One presentation projection supplies each
+batch tile's problem and every target's reason in the fixed summary status slot,
+including single targets without a strip and new problems beside prior Run results.
+Over-limit reasons include the actual count and `MAX_JOBS_PER_IMAGE` from
+`src/features/variations/limits.mjs` (also exported by `shared.mjs`).
+Only admitted counts contribute submission work and time estimates; Run is disabled
+when no target is admitted.
+
+After the archive is sealed the same planner records durable `admission` evidence
+in the existing effects table. Materialization, target preparation and dispatch
+require that target's admission (409 otherwise). Actual receipt-backed preparation
+must equal its admitted count. Naming, final graphs and independent write proofs
+remain downstream checks; any late failure is reported as a leftover, never an
+automatic retry. Source/destination fences, archive-before-effects and durable
+claims remain unchanged. Confirmed queued targets leave the editor's batch strip;
+leftovers stay highlighted with their problem and keep the dialog open. Recipe
+edits and native fields remain intact so an explicit adjusted Run creates a new
+history entry for the rest. If the recipe changed during Run, no captured target
+is removed: the whole cohort remains available for newer unsent edits, and each
+tile reports its captured-setup outcome (queued or issue). Only an unchanged
+revision removes queued targets. Admitted targets all queued means `submitted`, even
+with known leftovers; all leftovers means `rejected`, with their problems recorded.
+The successful close countdown remains editable: a newer recipe revision during
+that countdown restores the last submitted cohort with its queued outcomes, so
+new unsent edits still have subjects. It never restores targets for an unchanged
+draft or re-adds queued siblings to a nonempty leftover cohort.
 
 #### Durable Variations snapshots
 
@@ -439,7 +527,7 @@ outside the acknowledgement. Legacy Run requests remain compatible.
 | 1 | `/history` | GET | Newest-first summary pages, `limit`1-100 (default50), opaque `before` cursor; format, independent revision, items and nextCursor. Lists never load full graphs/image sets. |
 | 2 | `/history` | POST | Begin `{runId,format:1,cohortMode,targets,recipe,resources}` before resource acquisition/effects. Same validated capture is idempotent; conflicting reuse is409. Raw incomplete editor strings remain data. |
 | 3 | `/history/<id>/resources/<resourceId>` | PUT | Octet-stream bytes for a reserved browser image occurrence. The engine hashes them; repeated changed bytes conflict. |
-| 4 | `/history/<id>/prepare` | POST | Archive ordered targets/declared graph inputs/raw selected and dormant image items, seal the immutable snapshot and preflight all target contracts. Missing bytes or invalid edits retain an inspectable failed attempt and authorize no upstream effects. |
+| 4 | `/history/<id>/prepare` | POST | Archive ordered targets/declared graph inputs/raw selected and dormant image items, seal the immutable snapshot and record per-target `admission`. Invalid edits return rejected admission/problems; missing bytes fail the archive barrier. Neither authorizes effects for those targets. |
 | 5 | `/history/<id>` | GET | Detail/raw recipe, target facts and resource manifest; incomplete attempts explicitly report their archive state. |
 | 6 | `/history/<id>/open` | POST | Acquire an editor lease, return original data and fresh matched-source contexts; missing/offline sources preserve inspection without retargeting. |
 | 7 | `/history/<id>/leases/<leaseId>` | DELETE | Release a draft pin without deleting another run's resources. |
@@ -448,6 +536,7 @@ outside the acknowledgement. Legacy Run requests remain compatible.
 | 10 | `/history/<id>/prepare-target` | POST | Same target/origin/snapshot binding; compile actual resource receipts to one stable requestId/planHash/expectedTotal and final v2 request. The graph remains engine-private. |
 | 11 | `/history/<id>/finish` | POST | Record a client error/end observation; outcome/counts derive from durable engine effects, never caller-invented success. |
 | 12 | `/history/<id>` | DELETE | Idempotent tombstone from history, retaining open-draft/admitted-work pins. Never deletes source images, jobs or judgments. |
+| 13 | `/plan` | POST | Capture-shaped `{cohortMode,targets,recipe,resources,destination?}` without browser bytes; read-only per-target workload plan. No archive, history row, upload or enqueue. |
 
 Every upload/permutation has a durable admission claim before its external call.
 Duplicate requests return stored evidence or pending/uncertain, never redispatch.
@@ -455,6 +544,25 @@ An interrupted started effect becomes uncertain at restart; unfinished captures
 become interrupted. Neither automatically resumes. Submitted means queue acceptance,
 not generation completion. Completed snapshot data is immutable; only outcome
 evidence changes. New Runs have new IDs. Archive failure prohibits effects.
+
+The editor dispatches admitted targets sequentially in batch-strip order. Each
+destination's existing address binding owns one prompt submission lane; within
+each target, generated permutations enter it in order. The lane durably claims
+each job before its HTTP call and advances only on `ClientRequest`'s `finish`
+(connection established and request body written), without waiting for the reply.
+Responses may overlap; acceptance, partial and uncertain evidence remain separate
+from sending. This is not a ComfyUI queue-number guarantee: rare upstream
+reordering after body receipt is accepted. Destination retirement aborts transport
+and refuses queued, unsent work; interrupted effects never replay automatically.
+
+Saved-run detail exposes `submission: {sent,total}` from permutation journal
+evidence and saved cohort admission. `sent` records actual request-body completion,
+not queue acceptance; pending responses may already count as sent. The dialog
+reads that live record every 500 ms during its owned Run, aborting and fencing
+reads/timers on completion or disposal. Run's existing sidebar slot shows a spinner
+and one-line `Submitting <sent> / <total>` without shifting the layout; unavailable
+read facts display `--`, never invented progress. Terminal results and leftovers
+keep their existing acceptance/adoption behavior. No new database table is added.
 
 Named-resource proof uses opt-in `Ingest.ensure(...,{fresh:true})`: fresh flights
 cannot join cache-hit flights but share the same source fences, four-read address
@@ -1276,22 +1384,28 @@ feed's filename/parameter filter or selected folder. Input-root resources never
 inherit an output's judgment by name or bytes. Hiding candidates never removes
 chosen image-set items, captured targets or saved-run resources, or changes their
 counts; cached catalogues reproject without refetching or editing the recipe.
+Visible generated candidates show decorative up-voted, starred and bookmarked
+dots in that order with no gaps, using the feed colors and exact same-source optimistic
+judgments; other sources use their own catalogue facts. Their accessible names
+include the markers. Input-root candidates never inherit output markers.
 
-Each Load Image row owns one ordered image set, initially empty. Existing ComfyUI
-input names, native browser Files and engine-host image paths can be added over multiple turns and mixed;
-identity deduplication uses input name, exact File identity or absolute engine path, never filename-only
+Each Load Image row owns one ordered image set, seeded with its exact recorded
+current resource while the parameter stays off. Existing ComfyUI root-qualified
+references, native browser Files and engine-host image paths can be added over multiple turns and mixed;
+identity deduplication uses root/name, exact File identity or absolute engine path, never filename-only
 deduplication of Files. Removal changes that same set. Each chosen tile reserves
 one comparison-status line, so pending/current/ready/error settlement cannot move
 the acquisition controls. Single-line statuses retain full native tooltips. The chosen thumbnail grid
 is above persistent acquisition controls inside the explicitly added card. Turning
 the axis off hides its card without discarding the ordered set. "ComfyUI
 inputs" opens a searchable, virtualized, multi-select list; arrows/Enter select
-and Escape closes its owned popup before the modal. The input grid mounts three
-extra rows on each side to acquire thumbnails before visibility, and declares one
-further viewport in the scroll direction as background image demand. Search, close
-and range changes retire obsolete demand. Visible/three-row-ahead thumbnails and
-the chosen grid register foreground displays of the Store's one acquisition policy;
-further directional rows use its background ceiling and low browser priority,
+and Escape closes its owned popup before the modal. The input grid mounts 15
+lookahead tiles on each side, rounded up to whole rows. Smoothed travel velocity
+extends only the travel side by half a second of rows, capped at 90 tiles; stopped
+motion returns to the base band within 300 ms. Search, close and range changes
+retire obsolete demand. Visible thumbnails and the chosen grid register foreground
+displays of the Store's one acquisition policy; lookahead uses its existing
+two-slot background image lane and low browser priority,
 retaining their native lifetime as they move into view. Both share its image
 and app-origin capacity, preserving the reserved metadata connection, and decode
 asynchronously. A source change does not retire them, their owner's
@@ -1305,7 +1419,22 @@ timer. All client entry paths (including input listing/upload, thumbnails, Detai
 feed and HEAD requests) use the shared entry URL serializer. Raw names are encoded
 exactly once; Comfy listing annotations are removed only at ingress. The engine's
 Comfy view URL owner separately encodes its filename/subfolder query contract.
-“Add files…” uses the browser's multi-file picker;
+Picked tiles offer quarter-turn rotation, clockwise normally and counterclockwise
+while Alt/Option is held. Turns compose from the original bytes, replacing the
+tile in place with an ordinary `<stem>_r<degrees>.png` File; a full turn restores
+the exact original item. Read/encode settlement is editor-membership-fenced.
+Target-relative Current image tiles have no rotation action. Upload, archive,
+comparison, naming and Run use the same resulting File lane as ordinary picks.
+
+Holding Space over a chosen or picker image peeks at it above the dialog and
+popup without changing focus, scroll, selection or recipe. Dispatcher admission
+declines text-entry focus and empty hover; the active peek owns Space release
+and blur. One pointer-transparent view animates uniformly from the tile to a
+margin-fitted viewport box and back, with reduced-motion show/hide. A decoded
+thumbnail remains until its full image or replacement decodes, and both use the
+shared foreground display owner. Dialog disposal retires the whole peek lifetime.
+
+"Add files..." uses the browser's multi-file picker;
 there is no browser-directory input or mutually exclusive image mode.
 The persistent “Folder on the engine computer” path field and “Add folder” action recursively acquire engine-host
 images, including subfolders. The feature filesystem owner skips symlink traversal,
@@ -1643,8 +1772,14 @@ for preview and Run. Probe's `outputNaming` and additive `outputNamingTargets`
 carry stable node/parameter IDs, original directory and fallback source stem.
 Explicit candidates require text and retain the original directory exactly; invalid
 paths or candidates requiring truncation reject the whole plan before enqueue,
-without sanitizing or dropping path text. Root empty and whitespace values remain
-exact. Compositional proof binds the actual candidate, parameter ID, stable node ID
+without sanitizing or dropping path text. Root empty and whitespace candidates remain
+exact during preliminary validation. Every final composed output name, after manual
+affixes and automatic naming, must pass `isCreatedEntryPath`: the shared relative
+address grammar plus rejection of control characters. Listed resource names
+still retain their exact control characters. An empty
+candidate is allowed only when its final composition is valid. Invalid final names
+reject before any enqueue, including names from the unselected/fallback paths.
+Compositional proof binds the actual candidate, parameter ID, stable node ID
 and final composed write. It does not pretend the raw candidate equals the final
 name, certify a lost candidate or create proof for pruned operations.
 
@@ -1759,11 +1894,21 @@ varies. Explicit IDs are required to address siblings independently. Variation
 drafts and parameter choices are session-private and are not persisted, so
 there are no saved legacy parameter keys to migrate.
 
+Text values (including string candidates) use one synchronous, pure `textName`
+formatter in automatic naming and manual Prefix/Suffix tokens: `<clean10>~<hash6>`.
+For `clean10`, replace each run outside ASCII letters, digits, `.` and `-` with
+one `_`, trim leading/trailing `_` and `.`, then take the first 10 characters
+(or `text` if empty). `hash6` is the first six lowercase hex digits of SHA-256
+over the exact full original UTF-8 text, before cleaning. Preview and Run use
+the same formatter. Numeric, boolean and closed-list enum labels keep their
+existing formatting; explicit output-prefix candidates are not text tokens and
+remain exact. Graph values and lineage retain the original text.
+
 Every resolved naming-token value is bounded to **40 UTF-8 bytes**, for every
 parameter kind. Image tokens first remove the filename's last extension:
 `dragon.png` becomes `dragon`. Longer values fold deterministically to a head
 of at most 19 bytes, `~`, and a tail of at most 20 bytes, without splitting a
-Unicode code point. Short values and ordinary numeric formatting stay unchanged.
+Unicode code point. Short non-text values and ordinary numeric formatting stay unchanged.
 The bound applies only to naming substitutions: graph values, image upload names,
 raw recipe text and lineage metadata remain exact. Keeping the tail retains the
 newest counters and distinguishes long names with a shared head and different tails;
@@ -2045,6 +2190,34 @@ no prefs/registry/profile/lock reset or notice persistence is performed.
 Content is what the bytes are; a collection is a namespace of names backed
 by a host or folder; an entry is one instance's state in one collection.
 
+Store opens SQLite with `int64: true`. Every prepared read (`get`, `all`,
+`value`), including migrations, passes through one numeric-row boundary: safe
+INTEGERs are JS Numbers and unsafe INTEGERs throw RangeError before reaching
+comparisons, arithmetic, keyset cursors or JSON. SQL TEXT/REAL/NULL values keep
+their types; exact graph integers inside JSON TEXT keep their separate codec.
+No schema/data migration is needed: stored 64-bit values were already correct.
+
+Integer-column audit (all covered by that boundary when selected):
+
+| # | Table | INTEGER columns |
+|---|---|---|
+| 1 | `content` | `width`, `height`, `has_workflow`, `ext`, `bytes` |
+| 2 | `entry` | `favorite`, `bookmark`, `hidden`, `width`, `height` |
+| 3 | `collection` | `pinned`, `auto_refresh` |
+| 4 | `variation_run` | `created_at`, `format`, `submitted_count`, `total_count`, `updated_at`, `deleted_at` |
+| 5 | `variation_asset` | `bytes`, `complete` (currently write-only) |
+| 6 | `variation_effect` | `created_at`, `updated_at` |
+| 7 | `variation_lease` | `created_at` |
+| 8 | Legacy `metadata`, `images` | `has_workflow`, `nopng`, `ext` |
+| 9 | Legacy `files` | `size` |
+| 10 | SQL-generated integers | `COUNT(*)`, rowids and PRAGMA numeric fields |
+
+`kv.v` is TEXT, including metadata/history revision counters; SQL increments
+cast back to TEXT and the existing Store getters convert to Number. Other
+timestamps are REAL. Migration folds copy integers inside SQL, without a JS
+round-trip. Direct database fixtures must opt into int64 when asserting large
+integer reads; fixture writes do not depend on the read option.
+
 ```sql
 CREATE TABLE content (
   hash TEXT PRIMARY KEY,          -- sha256 of the bytes
@@ -2162,8 +2335,9 @@ graph reads. It returns `[meta, hasWorkflow, graph]`, with the executed API prom
 graph separate from the editor workflow. Hash-only readers select by signature.
 PNG text (including APNG `comf` chunks after IDAT), WebP EXIF prefix strings,
 QuickTime mdta keys/ilst and iTunes comment envelopes, and Matroska SimpleTags
-all produce the same metadata/lineage contract. Version5 re-extracts previously
-ingested content through the existing staleness owner. No ffmpeg/runtime decoder
+all produce the same metadata/lineage contract. String values are stored complete,
+without display truncation. Version 6 re-extracts previously truncated content
+through the existing staleness owner. No ffmpeg/runtime decoder
 dependency is introduced.
 
 Audio readers normalize FLAC Vorbis-comment blocks, Ogg Opus `OpusTags` packets
@@ -2175,7 +2349,7 @@ write `comment={"prompt":…, "workflow":…, "kz":…}` to retain them in `ICMT
 Without embedded metadata a WAV is still listed/playable, with no invented graph.
 Current stock ComfyUI SaveAudio writes FLAC/MP3/Opus, not WAV. Readers check record
 bounds, skip unsupported ID3 compression/encryption and never search encoded audio
-payloads for JSON. Audio adds no further extractor-version bump (version remains 5).
+payloads for JSON. Audio uses the same extractor version and complete-string contract.
 
 `Ingest.dims(collection, name, kind="output")` is the pre-ingest half: dims live in a
 file's first bytes (PNG IHDR, GIF descriptor, WebP VP8*, JPEG SOF), so a

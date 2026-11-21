@@ -9,7 +9,8 @@ import { parseExactJson } from "./parameters.mjs";
 // Bump when the extraction shape changes; content rows with an older ext
 // are stale and re-extract on their next ingest (decided in src/ingest.mjs,
 // the one place staleness lives).
-export const EXTRACTOR_VERSION = 5;
+// Version 6 restores complete string inputs in previously truncated metadata.
+export const EXTRACTOR_VERSION = 6;
 
 // --- graph walking helpers -------------------------------------------------
 
@@ -54,18 +55,18 @@ export function basename(v) {
 }
 
 // Generic scan of a prompt graph: every node's scalar inputs, no node names
-// involved. Links (arrays) are skipped; strings are capped; class_type is the
+// involved. Links (arrays) are skipped; strings are complete; class_type is the
 // node name, _meta.title (when present) is its display title. This feeds the
 // registry: node types and their fields are discovered from graphs.
 // (The class_type probes BELOW, by contrast, are empirical field data ported
 // verbatim from real fleets — spec #15. Different rule on purpose.)
-export function collectNodes(graph, { stringCap = 4096 } = {}) {
+export function collectNodes(graph) {
   const out = [];
   for (const [id, n] of Object.entries(graph ?? {})) {
     const inputs = {};
     for (const [k, v] of Object.entries(n.inputs ?? {})) {
       if (typeof v === "number" || typeof v === "boolean") inputs[k] = v;
-      else if (typeof v === "string") inputs[k] = v.length > stringCap ? v.slice(0, stringCap) + "…" : v;
+      else if (typeof v === "string") inputs[k] = v;
     }
     if (!Object.keys(inputs).length) continue;
     const title = n._meta?.title;

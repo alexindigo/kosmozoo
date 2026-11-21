@@ -1,10 +1,16 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, settledCount } = require('./variation-add-helpers.cjs');
+const { temporaryPath } = require('./paths.cjs');
 module.exports = async ({page,evaluate,invoke,list,write,ENGINE,FAKE,E,phase,shot}) => {
-  const root='/work/runtime/history-fixtures';
+  const root=temporaryPath('history-fixtures');
   const files=[root+'/repeat-1/same.png',root+'/repeat-2/same.png',...Array.from({length:78},(_,i)=>root+'/images/image-'+String(i+3).padStart(2,'0')+'.png')];
+  const { testPng } = await import('../helpers/png.mjs');
+  for (const [index,file] of [root+'/single.png',...files].entries()) {
+    fs.mkdirSync(require('node:path').dirname(file), { recursive: true });
+    fs.writeFileSync(file, testPng(48, 32, [index*3%256, index*7%256, index*13%256, 255]));
+  }
   const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
   const chooseFiles = async paths => {
     const {root:doc}=await page.send('DOM.getDocument');
@@ -19,9 +25,11 @@ module.exports = async ({page,evaluate,invoke,list,write,ENGINE,FAKE,E,phase,sho
     await page.clickAt('[data-image-id="43.image"] [data-image-kind="reference"] .vz-image-remove button');
   };
   const submit = async expected => {
+    await settledCount(page, expected);
     await page.clickAt('.vz-run');
-    await page.poll(`document.querySelector('.vz-queued')?.textContent==='Queued ${expected} of ${expected} jobs'||!!document.querySelector('.vz-error')?.textContent`,90000);
-    assert.equal(await page.evaluate('document.querySelector(".vz-queued")?.textContent'),`Queued ${expected} of ${expected} jobs`,await page.evaluate('document.querySelector(".vz-error").textContent'));
+    const result=`${expected} confirmed, 0 partial, 0 unknown, 0 unsent; ${expected} sent.`;
+    await page.poll(`document.querySelector('.vz-queued')?.textContent===${JSON.stringify(result)}||!!document.querySelector('.vz-error')?.textContent`,90000);
+    assert.equal(await page.evaluate('document.querySelector(".vz-queued")?.textContent'),result,await page.evaluate('document.querySelector(".vz-error").textContent'));
     await invoke('variations.close'); await page.poll('!document.querySelector(".vz-panel")');
   };
   if(phase!=='recall'){
@@ -40,7 +48,7 @@ module.exports = async ({page,evaluate,invoke,list,write,ENGINE,FAKE,E,phase,sho
   const saved=JSON.parse(fs.readFileSync(E+'/record.json','utf8'));
   await page.clickAt('[data-workspace="variation-history"]'); await page.poll('document.querySelectorAll(".vh-panel .vh-entry").length===2');
   await page.poll('document.querySelector(".vh-thumbs img")?.naturalWidth>0'); await shot('one-and-80-images');
-  await page.clickAt(`[data-history-id="${saved.id}"] .vh-inspect`);
+  await page.clickAt(`[data-history-id="${saved.id}"] .vh-images .vh-inspect`);
   await page.poll('document.querySelectorAll(".vh-contact-tile").length>0');
   await page.poll('document.querySelector(".vh-contact-tile img")?.naturalWidth>0'); await shot('images-expanded');
   assert(await page.evaluate('document.querySelectorAll(".vh-contact-tile").length<50'),'contact sheet is virtualized, not an eager 80-image burst');

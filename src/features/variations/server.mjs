@@ -12,7 +12,7 @@
 import {
   generatePermutations, permutationAxes, permutationPlan, resolveRelativeRanges,
   parameterIndex, parameterCurrent, catalogueParams, parameterAliases, validRunAcknowledgement, runOperationFields, targetRunPlan,
-  composeOutputName, variationOutputName, reproducesOriginal,
+  composeOutputName, variationOutputName, reproducesOriginal, MAX_JOBS_PER_IMAGE,
 } from "./shared.mjs";
 import { validEntryName, backingFor as defaultBackingFor } from "../../backings/index.mjs";
 import { sourceOrigin, sameOrigin, validOrigin, validContext, expectedOrigin } from "../../source-origin.mjs";
@@ -22,22 +22,21 @@ import { IMAGE_EXTENSIONS, mediaExtension } from "../../backings/mime.mjs";
 import { listImages, readImage, folderError } from "./folder-images.mjs";
 import { inspectImage } from "./image-inspection.mjs";
 import { readJson, mediaHeaders } from "../../routes.mjs";
-import { isResourceRoot, cloneJsonValue, sameJsonValue, parseExactJson, stringifyExactJson } from "../../parameters.mjs";
+import { isResourceRoot, cloneJsonValue, sameJsonValue, parseExactJson, stringifyExactJson, paramId } from "../../parameters.mjs";
 import { compileValue, compileDiscreteAxes, validateFinalGraph } from "./compile.mjs";
 import { parameterCatalogue, findProducingOutputNode, outputNodeIndex, outputNamingTargets,
   outputPath, stripExtension, inspectSource, projectInspection } from "./inspection.mjs";
 import { registerHistory, historyResponse } from "./history-routes.mjs";
 import { registerPexels } from "./pexels.mjs";
 import { inspectDestination } from "./destination.mjs";
+import { submitPrompt } from "../../backings/comfy-submission.mjs";
+import { problemRoutes } from "./problem-transport.mjs";
+import { variationProblem, problemFrom, problemError, backendProblem, effectCounts } from "./problems.mjs";
 export { parameterCatalogue, findProducingOutputNode, outputNodeIndex, outputNamingTargets } from "./inspection.mjs";
 
 const exactResponse = (value, init = {}) => new Response(stringifyExactJson(value), {
   ...init, headers: { "Content-Type": "application/json", ...init.headers },
 });
-
-// hard cap on permutations per run — a sweep is a human-scale batch, not a
-// fork bomb (F7). Above the cap the run answers 413.
-const MAX_PERMUTATIONS = 500;
 
 // --- graph inspection (ComfyUI conventions) -----------------------------------
 
@@ -67,12 +66,12 @@ export function mutateGraph(graph, permutation, params, dynamicCombos = null, { 
         const key = name.slice(type.length + 1);
         if (!Object.hasOwn(inputs, key)) continue;
         const value = selections.has(key) ? selections.get(key) : inputs[key], branch = options.get(value);
-        if (selections.has(key) && !branch) throw new Error(`Unknown dynamic option for ${nodeId}.${key}: ${value}`);
+        if (selections.has(key) && !branch) throw problemError(variationProblem("dynamic-option", { phase: "mutation", parameter: { id: paramId(nodeId, key) }, node: nodeId, value }));
         if (!branch) continue;
         if (!Object.is(inputs[key], value)) {
           for (const child of Object.keys(inputs)) if (child.startsWith(key + ".")) delete inputs[child];
           for (const [child, value] of branch.defaults) {
-            if (value === undefined) throw new Error(`No object_info default for ${nodeId}.${child.slice(type.length + 1)}`);
+            if (value === undefined) throw problemError(variationProblem("dynamic-default", { phase: "mutation", parameter: { id: paramId(nodeId, key) }, child: `${nodeId}.${child.slice(type.length + 1)}`, value: selections.get(key) }));
             inputs[child.slice(type.length + 1)] = cloneJsonValue(value);
           }
         }
@@ -117,7 +116,7 @@ function writeOutputNames(graph, targets, pfx, sfx, { values = {}, proofs = [] }
   const written = [];
   for (const target of targets) {
     const node = graph[target.nodeId];
-    if (!node?.inputs) throw new Error(`Producing output node ${target.nodeId} is missing`);
+    if (!node?.inputs) throw problemError(variationProblem("producer-missing", { phase: "naming", node: target.nodeId }));
     const result = composeOutputName(target, values, pfx, sfx);
     node.inputs.filename_prefix = result.value;
     if (result.selected) proofs.push({ ...result, nodeId: target.nodeId });
@@ -163,8 +162,13 @@ export function lineageTag(source, params) {
 // app: { store, cache, hosts, ingest, comfy, backings, paths } — the engine surface
 // for features.
 export function register(app) {
+  app = problemRoutes(app);
   const backingFor = app.backings?.backingFor ?? defaultBackingFor;
   const history = registerHistory(app);
+  app.route("POST", "/plan", async req => {
+    try { return exactResponse(await history.plan(await readJson(req, { parse: parseExactJson }))); }
+    catch (error) { return exactResponse({ error: error.message, ...(error.problem ? { problem: error.problem } : {}) }, { status: error.status ?? 400 }); }
+  });
   registerPexels(app);
   app.route("GET", "/folder-chooser", async () => Response.json(await app.desktop.capability()));
   app.route("POST", "/choose-folder", async req => {
@@ -198,84 +202,86 @@ export function register(app) {
   app.route("POST", "/upload-path/<host>", async (req, { host }) => {
     try {
       const { origin, token } = source(req, host), body = await readJson(req);
-      if (!/^[a-f0-9]{64}$/.test(body.hash)) return Response.json({ error: "Inspected image hash required" }, { status: 400 });
+      if (!/^[a-f0-9]{64}$/.test(body.hash)) return Response.json({ error: "Inspected image hash required", problem: variationProblem("image-changed", { phase: "upload", resource: body.path }) }, { status: 400 });
       const file = await readImage(body.path);
-      if (await sha256(file.bytes) !== body.hash) return Response.json({ error: "Image changed since it was added. Remove and add it again." }, { status: 409 });
-      if (!app.backings.isCurrent(token)) return Response.json({ error: "Source origin changed before upload" }, { status: 412 });
+      if (await sha256(file.bytes) !== body.hash) return Response.json({ error: "Image changed since it was added. Remove and add it again.", problem: variationProblem("image-changed", { phase: "upload", resource: body.path }) }, { status: 409 });
+      if (!app.backings.isCurrent(token)) return Response.json({ error: "Source origin changed before upload", problem: variationProblem("upload-retired", { phase: "upload", destination: host, resource: body.path, stage: "before" }) }, { status: 412 });
       const backing = backingFor(token.address);
       if (!backing.write) return Response.json({ error: "This source cannot upload images" }, { status: 400 });
       const receipt = await backing.write(token.address, file.name, file.bytes);
-      if (!receipt.ok) return Response.json({ error: receipt.error }, { status: receipt.status });
-      if (!app.backings.isCurrent(token)) return Response.json({ error: "Source changed after upload; no follow-up was authorized", uploaded: { name: receipt.name, origin } }, { status: 412 });
+      if (!receipt.ok) return Response.json({ error: receipt.error, problem: backendProblem(receipt, { phase: "upload", destination: host, resource: file.name }) }, { status: receipt.status });
+      if (!app.backings.isCurrent(token)) return Response.json({ error: "Source changed after upload; no follow-up was authorized", uploaded: { name: receipt.name, origin }, problem: variationProblem("upload-retired", { phase: "upload", destination: host, resource: file.name, stage: "after", uploaded: { name: receipt.name, origin } }) }, { status: 412 });
       return Response.json({ name: receipt.name, origin });
     } catch (error) { return folderError(error); }
   });
   // Readonly comparison through the existing byte/hash owner. This deliberately
   // does not upload to ComfyUI or create another input cache.
   app.route("POST", "/inspect-image/<host>", async (req, { host }) => {
+    const invalid = (error, field, resource) => Response.json({ error, problem: variationProblem("comparison-request", { phase: "comparison", source: host, field, resource }) }, { status: 400 });
     let origin;
-    try { origin = expectedOrigin(req); } catch (error) { return Response.json({ error: error.message }, { status: 400 }); }
+    try { origin = expectedOrigin(req); } catch (error) { return invalid(error.message, "source origin"); }
     const token = app.backings.capture(host);
     if (!origin || !token || !sameOrigin(origin, sourceOrigin(host, app.backings.source(host))) || !app.backings.accepting()) return Response.json({ error: "Source origin changed" }, { status: 412 });
     let form;
-    try { form = await req.formData(); } catch { return Response.json({ error: "Multipart image required" }, { status: 400 }); }
+    try { form = await req.formData(); } catch { return invalid("Multipart image required", "multipart image body"); }
     const file = form.get("image"), current = form.get("current"), kind = form.get("kind");
-    if (!(file instanceof File) || !IMAGE_EXTENSIONS.has(mediaExtension(file.name)) || !validEntryName(token.address, current) || !isResourceRoot(kind)) return Response.json({ error: "Image and current input required" }, { status: 400 });
+    if (!(file instanceof File) || !IMAGE_EXTENSIONS.has(mediaExtension(file.name)) || !validEntryName(token.address, current) || !isResourceRoot(kind)) return invalid("Image and current input required", "image file, current reference or resource root", file?.name);
     let names;
-    try { names = JSON.parse(form.get("names") ?? "[]"); } catch { return Response.json({ error: "Input names must be an array" }, { status: 400 }); }
+    try { names = JSON.parse(form.get("names") ?? "[]"); } catch { return invalid("Input names must be an array", "input name list", file.name); }
     return inspectImage(app, token, host, { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()), current, kind, names }, origin);
   });
   const inspect = (collection, name, expected = null) => inspectSource(app, collection, name, expected);
 
   app.route("GET", "/probe/<id>", async (_req, { id }) => {
     const i = id.indexOf(":");
-    if (i < 0) return Response.json({ error: "id must be collection:name" }, { status: 400 });
+    if (i < 0) return Response.json({ error: "id must be collection:name", problem: variationProblem("inspection-request", { phase: "inspection", field: "image address (expected collection:name)" }) }, { status: 400 });
     const collection = id.slice(0, i), name = id.slice(i + 1);
     let expected = null;
     const raw = new URL(_req.url).searchParams.get("origin");
     if (raw !== null) {
-      try { expected = { origin: JSON.parse(raw) }; } catch { return Response.json({ error: "Invalid expected origin" }, { status: 400 }); }
-      if (!validOrigin(expected.origin)) return Response.json({ error: "Invalid expected origin" }, { status: 400 });
+      try { expected = { origin: JSON.parse(raw) }; } catch { return Response.json({ error: "Invalid expected origin", problem: variationProblem("inspection-request", { field: "source origin" }) }, { status: 400 }); }
+      if (!validOrigin(expected.origin)) return Response.json({ error: "Invalid expected origin", problem: variationProblem("inspection-request", { field: "source origin" }) }, { status: 400 });
     }
     let destination = null;
     const rawDestination = new URL(_req.url).searchParams.get("destination");
     if (rawDestination !== null) {
-      try { destination = JSON.parse(rawDestination); } catch { return Response.json({ error: "Invalid Run destination" }, { status: 400 }); }
-      if (!validOrigin(destination)) return Response.json({ error: "Invalid Run destination" }, { status: 400 });
+      try { destination = JSON.parse(rawDestination); } catch { return Response.json({ error: "Invalid Run destination", problem: variationProblem("inspection-request", { field: "Run destination" }) }, { status: 400 }); }
+      if (!validOrigin(destination)) return Response.json({ error: "Invalid Run destination", problem: variationProblem("inspection-request", { field: "Run destination" }) }, { status: 400 });
     }
     const r = await inspect(collection, name, expected);
-    if (r.error) return Response.json({ error: r.error }, { status: r.status });
+    if (r.error) return Response.json(r, { status: r.status });
     if (!destination) return exactResponse(projectInspection(r, name));
     const d = await inspectDestination(app, { graph: r.graph, hash: r.context.graphHash, name, original: projectInspection(r, name), originContext: r.context, destination });
-    if (d.error) return Response.json({ error: d.error }, { status: d.status });
+    if (d.error) return Response.json(d, { status: d.status });
     return exactResponse(d);
   });
 
   app.route("POST", "/run", async (req) => {
+    const invalidRequest = detail => Response.json({ error: detail, problem: variationProblem("run-request", { phase: "submission", detail }) }, { status: 400 });
     let body;
     try { body = await readJson(req, { parse: parseExactJson }); }
-    catch { return Response.json({ error: "JSON body required" }, { status: 400 }); }
+    catch { return invalidRequest("JSON body required"); }
 
-    if (!body || typeof body !== "object" || Array.isArray(body)) return Response.json({ error: "JSON object required" }, { status: 400 });
+    if (!body || typeof body !== "object" || Array.isArray(body)) return invalidRequest("JSON object required");
     const { id, host, filename, ranges, relative, imageParams, acknowledgement, context } = body;
     if (!id || !host || !filename || !ranges) {
-      return Response.json({ error: "missing required fields" }, { status: 400 });
+      return invalidRequest(`missing required fields: ${["id", "host", "filename", "ranges"].filter(key => !body[key]).join(", ")}`);
     }
     const sameHost = reproducesOriginal(host, context?.origin?.source);
     // Saved-plan requests execute on their engine-bound destination; direct
     // requests stay bound to the target's own source.
     if (!validContext(context) || !body.history && context.origin.source !== host) {
-      return Response.json({ error: "Version2 requires the captured source/graph context" }, { status: 400 });
+      return Response.json({ error: "Version2 requires the captured source/graph context", problem: variationProblem("plan-binding", { phase: "submission", detail: "Version2 requires the captured source/graph context" }) }, { status: 400 });
     }
     if (!validRunAcknowledgement(acknowledgement) || id !== `${host}:${filename}` ||
         Object.keys(ranges).some(key => ranges[key]?.enabled && imageParams?.[key]?.enabled)) {
-      return Response.json({ error: "invalid or ambiguous submission acknowledgement request" }, { status: 400 });
+      return Response.json({ error: "invalid or ambiguous submission acknowledgement request", problem: variationProblem("plan-binding", { phase: "submission", detail: "invalid or ambiguous submission acknowledgement request" }) }, { status: 400 });
     }
 
     const execute = async (r, journal = null) => {
-    if (r.error) return Response.json({ error: r.error }, { status: r.status });
+    if (r.error) return Response.json(r, { status: r.status });
     const { graph, outputClasses, token, backing } = r;
-    if (!outputClasses) return Response.json({ error: `ComfyUI node information is unavailable: ${r.schemaError ?? "could not identify output nodes"}; no jobs were submitted` }, { status: 502 });
+    if (!outputClasses) return Response.json({ error: `ComfyUI node information is unavailable: ${r.schemaError ?? "could not identify output nodes"}; no jobs were submitted`, problem: variationProblem(r.schemaIssue?.code ?? "declarations-unavailable", { phase: "destination", target: { name: filename, source: host }, destination: context.origin.source, detail: r.schemaError, ...r.schemaIssue }) }, { status: 502 });
 
     // Inspect once for current values + labels. Types come from the host's
     // object_info — the current value is not a reliable integer signal.
@@ -296,16 +302,16 @@ export function register(app) {
       resolvedRanges = relative ? resolveRelativeRanges(selectedRanges, currentValues) : selectedRanges;
       if (Object.keys(selectedRanges).some(id => !Object.hasOwn(resolvedRanges, id))) throw new Error("Every applicable relative range needs clamp bounds");
       const count = permutationPlan(resolvedRanges, currentValues, selectedValues, { sameHost }).total;
-      if (count > MAX_PERMUTATIONS) return Response.json({ error: `too many permutations (${count} > ${MAX_PERMUTATIONS})` }, { status: 413 });
+      if (count > MAX_JOBS_PER_IMAGE) return Response.json({ error: `too many permutations (${count} > ${MAX_JOBS_PER_IMAGE})`, problem: variationProblem("too-many", { phase: "plan", numbers: { count } }) }, { status: 413 });
       permutations = generatePermutations(resolvedRanges, currentValues, selectedValues, { sameHost });
     } catch (e) {
-      return Response.json({ error: e.message }, { status: 400 });
+      return Response.json({ error: e.message, problem: problemFrom(e, { phase: "plan", target: { name: filename, source: host } }) }, { status: 400 });
     }
     if (permutations.length === 0) {
-      return Response.json({ error: "no permutations to submit (enable an axis or move it off the current values)" }, { status: 400 });
+      return Response.json({ error: "no permutations to submit (enable an axis or move it off the current values)", problem: variationProblem("run-no-work", { phase: "plan", names: [...axes.enabled, ...axes.imgEnabled].map(([id]) => fullInspection.find(parameter => parameter.id === id)?.label ?? id) }) }, { status: 400 });
     }
-    if (permutations.length > MAX_PERMUTATIONS) {
-      return Response.json({ error: `too many permutations (${permutations.length} > ${MAX_PERMUTATIONS})` }, { status: 413 });
+    if (permutations.length > MAX_JOBS_PER_IMAGE) {
+      return Response.json({ error: `too many permutations (${permutations.length} > ${MAX_JOBS_PER_IMAGE})`, problem: variationProblem("too-many", { phase: "plan", numbers: { count: permutations.length } }) }, { status: 413 });
     }
     console.log(`[variations] run ${host}:${filename} — ${permutations.length} permutations over ${axes.imgEnabled.length} enum/text axes`);
 
@@ -314,7 +320,8 @@ export function register(app) {
       ? findProducingOutputNode(graph, filename, outputClasses)
       : null;
     if (filename.includes("/") && !producing) {
-      return Response.json({ error: "Cannot identify an unambiguous producing output directory for this image" }, { status: 400 });
+      const directory = outputPath(filename).directory;
+      return Response.json({ error: "Cannot identify an unambiguous producing output directory for this image", problem: variationProblem("producer-ambiguous", { phase: "naming", target: { name: filename, source: host }, directory, numbers: { outputs: outputNodeIndex(graph, outputClasses).filter(id => outputPath(graph[id].inputs?.filename_prefix ?? "").directory === directory).length } }) }, { status: 400 });
     }
 
     const namingTargets = outputNamingTargets(graph, filename, producing?.id, outputClasses ?? new Set());
@@ -326,32 +333,38 @@ export function register(app) {
     const accepted = [];
     let submitted = 0, uncertain = false, retired = false;
     const prepared = [];
-    const rejectPlan = error => exactResponse({ error, outcome: "rejected", submitted: 0, total: permutations.length,
-      errors: permutations.map(permutation => ({ permutation, error: `Plan rejected: ${error}` })),
-      acknowledgement: { ...acknowledgement, target: { id, host, filename }, context: r.context, accepted: [] } }, { status: 400 });
+    const rejectPlan = error => {
+      const problem = problemFrom(error, { phase: "preflight", target: { id, name: filename, source: host }, destination: context.origin.source, numbers: { planned: permutations.length }, effects: { sent: 0, confirmed: 0, partial: 0, unknown: 0, unsent: permutations.length } });
+      const message = typeof error === "string" ? error : error.message ?? problem.message;
+      return exactResponse({ error: message, problem, outcome: "rejected", submitted: 0, total: permutations.length,
+        errors: permutations.map(permutation => ({ permutation, error: `Plan rejected: ${message}`, problem })),
+        acknowledgement: { ...acknowledgement, target: { id, host, filename }, context: r.context, accepted: [] } }, { status: 400 });
+    };
     for (const [index, perm] of permutations.entries()) {
       if (!app.backings.isCurrent(token)) {
-        return rejectPlan("source changed; no jobs were submitted");
+        return rejectPlan(problemError(variationProblem("dispatch-retired", { phase: "preflight", destination: context.origin.source, stage: "before", effects: { sent: 0, confirmed: 0, partial: 0, unknown: 0, unsent: permutations.length } })));
       }
       let mutation;
       try { mutation = mutateGraph(graph, perm, fullInspection, r.dynamicCombos, { rangeIds: new Set(Object.keys(resolvedRanges)) }); }
-      catch (error) { return rejectPlan(error.message); }
+      catch (error) { return rejectPlan(error); }
       const { graph: mutated, applied, writes } = mutation;
       // Only the kernel's empty identity tuple on another destination needs no
       // graph-axis writes. Naming/final graph/off-selection proofs still follow.
       if (applied.length === 0 && (sameHost || Object.keys(perm).length > 0)) {
-        return rejectPlan("No applicable nodes found; no jobs were submitted");
+        return rejectPlan(problemError(variationProblem("mutation-empty", { phase: "mutation", names: Object.keys(perm), numbers: { planned: permutations.length } })));
       }
 
       let namingWrites;
       const namingProofs = [];
       try {
-        if (!firstNamingTarget) return rejectPlan("No output node in graph");
+        if (!firstNamingTarget) return rejectPlan(problemError(variationProblem("output-missing", { phase: "naming", destination: context.origin.source })));
         // Validate every explicit output prefix, including retained dependencies,
         // without giving those dependencies new sidebar-affix writes.
-        for (const target of namingTargets) if (Object.hasOwn(perm, target.parameterId)) composeOutputName(target, perm);
+        for (const target of namingTargets) if (Object.hasOwn(perm, target.parameterId)) {
+          composeOutputName(target, perm, "", "", { preliminary: !producing || target.nodeId === producing.id });
+        }
         const naming = variationOutputName(firstNamingTarget, namingRequest, perm, currentValues, labelMap, fullInspection, { sameHost });
-        if (!naming.complete) return rejectPlan("Unresolved naming token: check prefix and suffix; no jobs were submitted");
+        if (!naming.complete) return rejectPlan(problemError(naming.problems[0]));
         const { prefix: pfx, suffix: sfx } = naming;
         const options = { targets: namingTargets, values: perm, proofs: namingProofs };
         if (producing) {
@@ -359,14 +372,14 @@ export function register(app) {
         } else {
           namingWrites = wrapAllOutputPrefixes(mutated, pfx, sfx, outputClasses ?? new Set(), options);
           if (!namingWrites.length) {
-            return rejectPlan("No output node in graph");
+            return rejectPlan(problemError(variationProblem("output-missing", { phase: "naming", destination: context.origin.source })));
           }
         }
-      } catch (error) { return rejectPlan(error.message); }
+      } catch (error) { return rejectPlan(error); }
 
       try { validateFinalGraph(mutated, fullInspection, r); }
       catch (e) {
-        return rejectPlan(e.message);
+        return rejectPlan(e);
       }
 
       const surviving = survivingAxes(mutated, writes, fullInspection, namingProofs);
@@ -374,7 +387,7 @@ export function register(app) {
       // affixes by construction; retained dependency outputs are not targets.
       const naming = namingWrites.length ? ["prefix", "suffix"] : [];
       const missing = Object.keys(perm).filter(id => !surviving.includes(id));
-      if (missing.length) return rejectPlan(`Operation ${missing.join(", ")} was pruned or overwritten in the final graph; no jobs were submitted`);
+      if (missing.length) return rejectPlan(problemError(variationProblem("mutation-lost", { phase: "mutation", names: missing, numbers: { planned: permutations.length } })));
       const appliedPlan = {
         ranges: surviving.filter(id => resolvedRanges[id]?.enabled && !imageParams?.[id]?.enabled),
         imageParams: surviving.filter(id => imageParams?.[id]?.enabled && !resolvedRanges[id]?.enabled),
@@ -385,22 +398,39 @@ export function register(app) {
     }
     // All final prompts and their exact write coverage are prepared before the
     // first irreversible enqueue. A failure in a later tuple cannot leak jobs.
+    const responses = [];
     for (const { index, perm, mutated, applied, selections, naming } of prepared) {
       if (!app.backings.isCurrent(token)) {
-        retired = true; errors.push({ permutation: perm, error: "source changed; remaining jobs were not submitted" }); break;
+        retired = true; errors.push({ permutation: perm, error: "source changed; remaining jobs were not submitted", problem: variationProblem("dispatch-retired", { phase: "submission", target: { name: filename, source: host }, destination: context.origin.source, stage: "during" }) }); break;
       }
       const job = {
         prompt: mutated,
         extra_data: { extra_pnginfo: lineageTag(`${host}:${filename}`, perm) },
       };
-      const res = journal ? await journal.enqueue(job, index) : await backing.enqueue(job);
+      const request = journal ? journal.submit(job, index) : submitPrompt(backing, job, { isCurrent: () => app.backings.isCurrent(token) });
+      responses.push(request.result.then(res => ({ res, index, perm, applied, selections, naming }), error => ({ error, index, perm })));
+      await request.sent;
+    }
+    const results = await Promise.all(responses);
+    // Drain every admitted request before propagating an internal journal error.
+    // A failed durable write must never become an ordinary upstream rejection.
+    const failure = results.find(result => result.error);
+    const counts = effectCounts(results.map(({ res, error }) => ({ state: error ? "unknown" : res.acceptance === "confirmed" ? "confirmed" : res.acceptance === "partial" ? "partial" : res.acceptance === "uncertain" || res.failure?.kind === "transport" || res.status >= 500 ? "unknown" : "rejected", sent: res?.sent === true })), permutations.length);
+    if (results.some(({ res }) => res?.sent === undefined)) counts.sent = null;
+    if (failure) {
+      counts.sent = null;
+      counts.unsent = permutations.length - results.length;
+      const problem = variationProblem("dispatch-tracking", { phase: "submission", target: { name: filename, source: host }, destination: context.origin.source, detail: failure.error.message, effects: counts });
+      return exactResponse({ error: problem.message, problem, effectCounts: counts, submitted: counts.confirmed, total: permutations.length, outcome: "uncertain-effects", errors: [{ error: problem.message, problem }] }, { status: 500 });
+    }
+    for (const { res, index, perm, applied, selections, naming } of results) {
       if (!res.ok) {
         console.error(`[variations] permutation failed ${stringifyExactJson(perm)} -> ${res.error}`);
-        errors.push({ permutation: perm, error: res.error });
+        errors.push({ index, permutation: perm, error: res.error, problem: backendProblem(res, { phase: "submission", target: { name: filename, source: host }, destination: context.origin.source, numbers: { index: index + 1, total: permutations.length }, effects: counts }) });
       } else {
         submitted++;
-        if (!app.backings.isCurrent(token)) { retired = true; errors.push({ permutation: perm, error: "source changed after submission; configuration was not acknowledged" }); }
-        else if (res.acceptance !== "confirmed") { uncertain ||= res.acceptance !== "partial"; errors.push({ permutation: perm, error: res.error ?? "submission acceptance is unconfirmed; do not automatically resubmit" }); }
+        if (!app.backings.isCurrent(token)) { retired = true; errors.push({ index, permutation: perm, error: "source changed after submission; configuration was not acknowledged", problem: variationProblem("dispatch-retired", { phase: "submission", target: { name: filename, source: host }, destination: context.origin.source, stage: "after", numbers: { index: index + 1, total: permutations.length }, effects: counts }) }); }
+        else if (res.acceptance !== "confirmed") { uncertain ||= res.acceptance !== "partial"; errors.push({ index, permutation: perm, error: res.error ?? "submission acceptance is unconfirmed; do not automatically resubmit", problem: backendProblem(res, { phase: "submission", target: { name: filename, source: host }, destination: context.origin.source, numbers: { index: index + 1, total: permutations.length }, effects: counts }) }); }
         else {
           accepted.push({ index, promptId: res.promptId, applied, selections, naming });
         }
@@ -409,7 +439,7 @@ export function register(app) {
 
     if (errors.length) console.error(`[variations] ${host}:${filename} → submitted ${submitted}/${permutations.length}, ${errors.length} failed`);
     else console.log(`[variations] ${host}:${filename} → submitted ${submitted}/${permutations.length}`);
-    return exactResponse({ submitted, total: permutations.length, errors, operations: effectivePlan.operations,
+    return exactResponse({ submitted, total: permutations.length, errors, effectCounts: counts, operations: effectivePlan.operations,
       outcome: retired ? "retired" : uncertain ? "uncertain-effects" : errors.length ? submitted ? "partial-effects" : "rejected" : "accepted-plan",
       acknowledgement: { ...acknowledgement, target: { id, host, filename }, context: r.context, accepted },
     });
@@ -418,7 +448,7 @@ export function register(app) {
       try {
         const result = await history.dispatch(body, execute);
         return historyResponse(result.data, result.status);
-      } catch (error) { return historyResponse({ error: error.message }, error.status ?? 500); }
+      } catch (error) { return historyResponse({ error: error.message, problem: problemFrom(error, { phase: "submission", target: { name: filename, source: host }, destination: context.origin.source }) }, error.status ?? 500); }
     }
     return execute(await inspect(host, filename, context));
   });

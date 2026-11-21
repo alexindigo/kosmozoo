@@ -13,43 +13,51 @@ import { createRoot, createSignal } from "solid-js";
 import { makeHistoryClient } from "./history-client.js";
 import { HistoryPanel } from "./HistoryPanel.js";
 import { makePexelsServices } from "./pexels-services.js";
+import { rotateImageFile } from "./image-rotate.js";
 import { PexelsSettings } from "./PexelsSettings.js";
+import { problemText } from "/shared/features/variations/problems.mjs";
 
 // Assembly injects modal services and registers owner-safe command definitions.
 export function install(store) {
   return createRoot(disposeRoot => {
   const [historyRevision, setHistoryRevision] = createSignal(0);
-  const history = makeHistoryClient({ api, changed: () => setHistoryRevision(n => n + 1) });
+   const report = problem => store.reportError(problemText(problem));
+   const history = makeHistoryClient({ api, changed: () => setHistoryRevision(n => n + 1), notifyProblem: report });
   const historyState = () => { historyRevision(); return history.state(); };
   const activate = () => history.activate();
   window.addEventListener("focus", activate); window.addEventListener("pageshow", activate);
   const [pexelsRevision, setPexelsRevision] = createSignal(0);
   const pexels = makePexelsServices({ api, changed: () => setPexelsRevision(n => n + 1) });
   const pexelsState = () => { pexelsRevision(); return pexels.state(); };
-  const broker = makeVariationSession({ read: () => store.state.variations,
+   const broker = makeVariationSession({ read: () => store.state.variations, report,
     write: (opening) => store.setSt("variations", store.reconcile(opening)) });
   const services = {
     // modal I/O — the feature's api.js owns the transport; the modal keeps
     // session-scoped results (probe params, file lists) in local signals
     probe(image, destination) { return api.probe(image, destination); },
     historyCatalogue: api.historyCatalogue,
+    plan: api.plan,
     // Every ComfyUI source can be a Run destination; the header selection is the default.
     runDestinations: () => Object.keys(store.state.hosts).filter(host => store.state.hosts[host].kind === "comfy")
       .map(host => sourceOrigin(host, store.state.hosts[host])).filter(validOrigin),
     generationTime: api.generationTime,
     history, historyState, historyThumbnail: api.historyThumbnail,
     inputList(hostName, origin, root = "input") { return api.inputList(hostName, origin, root); },
-    outputVisible(origin, record) {
+    outputCandidate(origin, record) {
       // Exact local entries include optimistic writes and identity-safe rollback.
       // A foreign catalogue retains its own judgments, never a name/hash alias.
       const local = sameOrigin(origin, sourceOrigin(origin.source, store.state.hosts[origin.source]))
         ? store.state.entryFor({ remote: origin.source, image: record.name })?.entry : null;
-      return judgmentVisible(local?.filename === record.name && local.host === origin.source ? local.judgment : record.judgment, store.state.judgmentPrefs);
+      const judgment = local?.filename === record.name && local.host === origin.source ? local.judgment : record.judgment;
+      return { judgment, visible: judgmentVisible(judgment, store.state.judgmentPrefs) };
     },
     uploadInput(hostName, form, origin) { return api.uploadInput(hostName, form, origin); },
     inspectImage: api.inspectImage,
     inputThumbnail: api.inputThumbnail,
     readInput: api.readInput,
+    readPath: api.readPath,
+    readArchive: api.readArchive,
+    rotateImage: rotateImageFile,
     inputSources: () => Object.keys(store.state.hosts).filter(host => store.state.hosts[host].kind === "comfy" && store.state.hosts[host].capabilities?.list !== false)
       .map(host => sourceOrigin(host, store.state.hosts[host])).filter(validOrigin),
     // Thumbnail bytes share the feed's engine route and browser connections:
@@ -63,7 +71,7 @@ export function install(store) {
     uploadPath: api.uploadPath,
     pexelsServices: pexelsState,
     loadPexelsServices: force => pexels.load(force),
-    pexelsApi: { pexelsPhotos: api.pexelsPhotos, pexelsThumbnail: api.pexelsThumbnail },
+    pexelsApi: { pexelsPhotos: api.pexelsPhotos, pexelsThumbnail: api.pexelsThumbnail, pexelsImage: api.pexelsImage },
     readPexelsPhoto: api.readPexelsPhoto,
     async run(payload) {
       if (!payload.history) throw new Error("A durable history capture is required before Run");
@@ -83,8 +91,9 @@ export function install(store) {
       ...["variations.discard.cancel", "variations.images.close"].map(id => ({ id, validate: args => Object.keys(args).length === 0 })),
       { id: "variations.tabs.move", validate: args => Object.keys(args).length === 1 && [-1, 1, "first", "last"].includes(args.step) },
       { id: "variations.feed-tabs.move", validate: args => Object.keys(args).length === 1 && [-1, 1, "first", "last"].includes(args.step) },
+      { id: "variations.peek.start", description: "peek at the hovered image while Space is held", validate: args => Object.keys(args).length === 0 },
     ],
-    commands: [...variationCommands({ state: store.state, broker }),
+     commands: [...variationCommands({ state: store.state, broker, report }),
       { id: "variations.history.open", description: "recall original variation run", validate: args => Object.keys(args).length === 1 && typeof args.id === "string",
         async execute({ id }) {
           const opening = broker.captureOpening();

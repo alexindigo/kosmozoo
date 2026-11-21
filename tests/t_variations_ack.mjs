@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "jsr:@std/assert";
 import { register, mutateGraph } from "../src/features/variations/server.mjs";
 import { makeCollectionLifecycle } from "../src/backings/index.mjs";
-import { acknowledgedFields } from "../src/features/variations/shared.mjs";
+import { acknowledgedFields, textName } from "../src/features/variations/shared.mjs";
 import { editorRig } from "./helpers/variation-editor.mjs";
 import { enqueue, write } from "../src/backings/comfy.mjs";
 
@@ -44,7 +44,7 @@ Deno.test("plan preflight: long text tokens are bounded, while graph text remain
   const response = await r.run(body), data = await response.json();
   assertEquals(response.status, 200); assertEquals(data.submitted, 2); assertEquals(r.jobs.length, 2);
   assertEquals(r.jobs[1].prompt.text.inputs.text, "x".repeat(450));
-  assert(r.jobs[1].prompt.output.inputs.filename_prefix.endsWith("_" + "x".repeat(19) + "~" + "x".repeat(20)));
+  assert(r.jobs[1].prompt.output.inputs.filename_prefix.endsWith("_" + textName("x".repeat(450))));
 });
 
 Deno.test("plan preflight: literal affixes alone over budget reject with lengths and zero enqueues", async () => {
@@ -58,10 +58,10 @@ Deno.test("plan preflight: literal affixes alone over budget reject with lengths
 Deno.test("plan preflight: a later expanded affix overflow rejects every tuple before enqueue", async () => {
   const r = rig(), body = await r.request();
   body.imageParams["text.text"].values = ["short", "x".repeat(450)];
-  body.prefix = ""; body.suffix = "{text.text}".repeat(6);
+  body.prefix = ""; body.suffix = "{text.text}".repeat(12);
   const response = await r.run(body), data = await response.json();
   assertEquals(response.status, 400); assertEquals(r.jobs.length, 0);
-  assert(data.error.includes("Prefix and suffix are 240 bytes; the limit is 200 bytes"));
+  assert(data.error.includes("Prefix and suffix are 204 bytes; the limit is 200 bytes"));
 });
 
 Deno.test("ack: mutation reports actual assignments, not absent descriptors/carriers", () => {

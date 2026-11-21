@@ -3,6 +3,7 @@ import { validEntryName } from "../../backings/index.mjs";
 import { sourceOrigin, sameOrigin } from "../../source-origin.mjs";
 import { graphParameters, editableParameter, stringifyExactJson } from "../../parameters.mjs";
 import { parameterIndex, catalogueParams, paramId } from "./shared.mjs";
+import { variationProblem } from "./problems.mjs";
 
 const PARAMETER_CHANNELS = { numeric: "params", image: "stringParams", enum: "enumParams", text: "textParams" };
 export function parameterCatalogue(graph, schema = {}) {
@@ -46,32 +47,39 @@ export function outputNamingTargets(graph, filename, producingId, outputClasses)
   });
 }
 export async function inspectSource(app, collection, name, expected = null, archived = null) {
-  if (!app.backings.accepting()) return { error: "Sources are stopping; no new operation was admitted", status: 503 };
+  const failure = (code, error, status, context = {}) => ({ error, status, problem: variationProblem(code, { phase: "inspection", target: { source: collection, name }, source: collection, ...context }) });
+  if (!app.backings.accepting()) return failure("source-stopping", "Sources are stopping; no new operation was admitted", 503);
   const token = app.backings.capture(collection), addr = token?.address;
-  if (!addr) return { error: "unknown collection", status: 404 };
+  if (!addr) return failure("source-missing", "unknown collection", 404);
   const origin = sourceOrigin(collection, app.backings.source(collection));
-  if (expected && !sameOrigin(expected.origin, origin)) return { error: "Source origin changed; work was kept", status: 412 };
+  if (expected && !sameOrigin(expected.origin, origin)) return failure("catalogue-stale", "Source origin changed; work was kept", 412);
   const backing = app.backings.comfy(collection);
-  if (!validEntryName(addr, name)) return { error: "bad entry path", status: 400 };
+  if (!validEntryName(addr, name)) return failure("source-path", "bad entry path", 400);
   // `archived` is supplied only by the engine history membership resolver.
   const hash = archived?.hash ?? app.store.hashFor(collection, name);
-  if (!hash) return { error: "image not ingested (no hash)", status: 404 };
-  if (expected?.graphHash && expected.graphHash !== hash) return { error: "Graph catalogue changed; work was kept", status: 412 };
+  if (!hash) return failure("source-unindexed", "image not ingested (no hash)", 404);
+  if (expected?.graphHash && expected.graphHash !== hash) return failure("workflow-changed", "Graph catalogue changed; work was kept", 412);
   const graph = archived?.graph ?? await app.ingest.graph(hash);
-  if (!app.backings.isCurrent(token)) return { error: "source changed during inspection", status: 409 };
-  if (!graph) return { error: "no embedded ComfyUI graph", status: 422 };
+  if (!app.backings.isCurrent(token)) return failure("inspection-retired", "source changed during inspection", 409);
+  if (!graph) return failure("workflow-missing", "no embedded ComfyUI graph", 422);
   try { stringifyExactJson(graph); }
-  catch (error) { return { error: `Embedded graph cannot be represented exactly: ${error.message}`, status: 422 }; }
-  const { types, enums, outputClasses, dynamicCombos, declarations, outputs, installed, schemaError } = await backing.objectInfo({ graph });
-  if (!app.backings.isCurrent(token)) return { error: "source changed during inspection", status: 409 };
+  catch (error) { return failure("workflow-inexact", `Embedded graph cannot be represented exactly: ${error.message}`, 422, { detail: error.message }); }
+  const { types, enums, outputClasses, dynamicCombos, declarations, outputs, installed, schemaError, schemaIssue, schemaWarnings } = await backing.objectInfo({ graph });
+  if (!app.backings.isCurrent(token)) return failure("inspection-retired", "source changed during inspection", 409);
   // Known only with a successful catalogue; unavailable knowledge is never "missing".
   const missing = installed ? [...new Set(Object.values(graph).map(node => String(node?.class_type ?? "")))].filter(type => !installed.has(type)).sort() : null;
-  return { graph, addr, types, enums, outputClasses, dynamicCombos, declarations, outputs, installed, missing, schemaError, token, backing, context: { origin, graphHash: hash } };
+  return { graph, addr, types, enums, outputClasses, dynamicCombos, declarations, outputs, installed, missing, schemaError, schemaIssue, schemaWarnings, token, backing, context: { origin, graphHash: hash } };
 }
 export function projectInspection(r, name) {
   const producing = findProducingOutputNode(r.graph, name, r.outputClasses ?? new Set());
   const targets = outputNamingTargets(r.graph, name, producing?.id, r.outputClasses ?? new Set());
-  return { ...parameterCatalogue(r.graph, r), context: r.context,
+  const catalogue = parameterCatalogue(r.graph, r);
+  const problems = (r.schemaWarnings ?? []).flatMap(warning => Object.entries(r.graph).filter(([, node]) => node.class_type === warning.type).map(([id]) => {
+    const input = warning.input.slice(warning.type.length + 1), parameter = catalogue.parameters.find(parameter => parameter.nodeIds.includes(id) && (parameter.key === input || parameter.key.startsWith(input + ".")));
+    return variationProblem("schema-incomplete", { severity: "warning", phase: "catalogue", target: { source: r.context.origin.source, name },
+      parameter: { id: parameter?.id ?? paramId(id, input), label: `${warning.type}.${input}` }, detail: warning.detail });
+  }));
+  return { ...catalogue, problems, context: r.context,
     nodes: Object.entries(r.graph).map(([id, node]) => ({ id, type: String(node.class_type ?? ""), title: node._meta?.title ?? null,
       outputs: r.outputs?.get(String(node.class_type ?? "")) ?? null })),
     outputNaming: targets.find(target => target.nodeId === producing?.id) ?? targets[0] ?? null, outputNamingTargets: targets };

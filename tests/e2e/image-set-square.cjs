@@ -79,7 +79,7 @@ module.exports = async ({ cdp, check = () => {} }) => {
       await cdp.send('Emulation.setDeviceMetricsOverride',{width,height:1000,deviceScaleFactor:1,mobile:false});
       await cdp.evaluate("document.querySelector('.vz-image-grid').scrollIntoView({block:'center'})");
       await inspect(`selected-${width}`,'.vz-image-tile');
-      await inspect(`sheet-${width}`,'.vz-image-tile, .vz-image-plus');
+      await inspect(`sheet-${width}`,'.vz-image-tile');
     }
     await cdp.send('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
     await cdp.evaluate("document.querySelector('.vz-sliders').scrollTop=0");

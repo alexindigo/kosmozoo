@@ -3,6 +3,7 @@ import { SingleLineText } from "../../components/SingleLineText.js";
 import { IconButton } from "../../components/IconButton.js";
 import { iconSvg } from "/js/icons.mjs";
 import { parameterName, conflictReason, conflictValue } from "./field-filter.js";
+import { ProblemFeedback } from "./ProblemFeedback.js";
 
 // Presentation only: identity, current context, enable intent and editor slot.
 // Catalogue IDs remain opaque; a readable name never becomes a token ID.
@@ -39,5 +40,6 @@ export function ParameterRow(props) {
     </div>}</Show>
     <Show when={props.enabled()}>{props.children}</Show>
     {props.status}
+    <ProblemFeedback problems={props.row().problems ?? []} />
   </div>;
 }

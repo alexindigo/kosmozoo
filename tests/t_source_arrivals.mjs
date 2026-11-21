@@ -9,6 +9,28 @@ import { buildContext } from "../src/context.mjs";
 import { createRoot } from "solid-js";
 import { makeSourceRegistry } from "../client-solid/store/source-registry.js";
 
+Deno.test('arrivals: committed votes publish compact facts for unselected sources without new sequences',async()=>{
+  const r=await mkStateRig('arrival-votes',{hosts:{a:'a:80'}});let sources;
+  try{
+    r.store.collectionAdd('a','a:80');
+    sources=new SourceActivity({store:r.store,hosts:r.hosts,inventory:r.inventory,jobs:{subscribe:()=>()=>{},snapshot:()=>({})}});
+    r.store.arrivals.observe('a',['old.png','new.png']);
+    const before=r.store.arrivals.projection('a',true);
+    r.store.judgmentPatch('a','new.png',{vote:'down'});
+    const down=sources.source('a',true).arrivals;
+    assertEquals(down.downVotedRanges,[[2,2]]);assertEquals(down.upVotedRanges,[]);
+    assertEquals(down.sequence,before.sequence);assert(down.revision>before.revision);
+    assertEquals(JSON.parse(r.store.arrivals.wire('a')),down);
+    r.store.judgmentPatch('a','new.png',{favorite:true});
+    assertEquals(sources.source('a',true).arrivals.revision,down.revision,'other judgments do not publish attention changes');
+    r.store.judgmentPatch('a','new.png',{vote:'up'});
+    assertEquals(sources.source('a',true).arrivals.upVotedRanges,[[2,2]]);
+    assertEquals(sources.source('a',true).arrivals.downVotedRanges,[]);
+    r.store.entryHide('a','new.png');
+    assertEquals(sources.source('a',true).arrivals.upVotedRanges,[]);
+  }finally{sources?.stop();await r.close();}
+});
+
 Deno.test("arrivals: restored visibility assigns sequences before every publication", () => {
   let excluded = ["restored.png"];
   const arrivals = new SourceArrivals({ hiddenNames: () => [], goneNames: () => excluded });
@@ -49,7 +71,8 @@ Deno.test("arrivals: projections read only exclusion names at mutation boundarie
   let broadReads = 0, nameReads = 0;
   const hidden = new Set(), gone = new Set(), events = [];
   const arrivals = new SourceArrivals({ entriesForCollection: () => { broadReads++; return []; },
-    hiddenNames: () => { nameReads++; return hidden; }, goneNames: () => { nameReads++; return gone; } });
+    hiddenNames: () => { nameReads++; return hidden; }, goneNames: () => { nameReads++; return gone; },
+    votedNames: () => { nameReads++; return []; } });
   arrivals.subscribe(id => events.push(id));
   arrivals.observe("a", ["old.png", "latest.png"]);
   assertEquals(broadReads, 0, "arrival filtering must not load content metadata");

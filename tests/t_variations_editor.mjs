@@ -26,9 +26,10 @@ Deno.test("editor contract: every declared editable field participates in dirty 
     }
   }
   const { editor } = editorRig();
-  assertThrows(() => editor.edit("numeric", "n.denoise", "invented", 1)); assert(!editor.dirty());
-  assertThrows(() => editor.edit("enums", "choice.value", "filter", "query")); assert(!editor.dirty());
-  assertThrows(() => editor.edit("numeric", "n.denoise", "min", .9)); assert(!editor.dirty()); editor.dispose();
+  assertEquals(editor.edit("numeric", "n.denoise", "invented", 1), false); assert(!editor.dirty());
+  assertEquals(editor.edit("enums", "choice.value", "filter", "query"), false); assert(!editor.dirty());
+  assertEquals(editor.edit("numeric", "n.denoise", "min", .9), false); assert(!editor.dirty());
+  assert(editor.problems().every(problem => problem.code === "edit-failed")); editor.dispose();
 });
 
 Deno.test("editor contract: one combined configuration consumes all eligible declared fields and reaches owned closure", async () => {
@@ -88,13 +89,13 @@ Deno.test("editor contract: source replacement after a confirmed upload stops ev
   rig.replaceSource(); release(); assertEquals((await pending).status, "stale");
   assertEquals(rig.requests.length, 0); assert(editor.dirty()); assert(editor.rows("images")["image.image"].items[1].file === file);
   assertEquals(editor.result().effects.uploads, [{ name: file.name, origin: rig.context.origin }]);
-  assert(editor.result().text.includes("fake was removed or changed since Variations opened.")); rig.fireTimers(); assertEquals(rig.closeCount(), 0); editor.dispose();
+  assert(editor.result().text.includes("image.png: fake changed.")); rig.fireTimers(); assertEquals(rig.closeCount(), 0); editor.dispose();
 });
 
 Deno.test("editor contract: malformed or old proof consumes no work and performs no implicit resubmission", async () => {
   const rig = editorRig({ run: async () => ({ ok: true, status: 200, data: { submitted: 1, total: 1, errors: [] } }) });
   const { editor } = rig; editor.edit("naming", "root", "prefix", "kept_");
-  await editor.run(); assert(editor.dirty()); assertEquals(editor.result().adopted, false); assert(editor.result().text.includes("acknowledgement unavailable"));
+  await editor.run(); assert(editor.dirty()); assertEquals(editor.result().adopted, false); assert(editor.result().text.includes("could not verify receipts for the expected"));
   rig.fireTimers(); assertEquals(rig.closeCount(), 0); editor.dispose();
 });
 
@@ -167,8 +168,9 @@ Deno.test("editor contract: initialization cannot overwrite early naming edits o
   editor.installCatalogue(base.catalogue); editor.installInputs({ origin: base.context.origin, files: ['origin.png'] });
   editor.setEnabled('n.denoise', true);
   assertEquals(editor.naming('prefix'), 'early prefix'); assertEquals(editor.naming('suffix'), 'early suffix');
-  assertThrows(() => editor.edit('numeric', 'n.denoise', 'current', 2));
-  assertThrows(() => editor.edit('images', 'image.image', 'files', ['other.png']));
+  assertEquals(editor.edit('numeric', 'n.denoise', 'current', 2), false);
+  assertEquals(editor.edit('images', 'image.image', 'files', ['other.png']), false);
+  assertEquals(editor.rows('numeric')['n.denoise'].current, 1);
   assertEquals((await editor.run()).adopted, true); assert(!editor.dirty()); editor.dispose(); base.editor.dispose();
 });
 
@@ -177,6 +179,6 @@ Deno.test("editor contract: context substitution in a correlated reply consumes 
     const response = await base.services.run(request); response.data.acknowledgement.context = { ...request.context, graphHash: 'b'.repeat(64) }; return response;
   } });
   rig.editor.edit('naming', 'root', 'prefix', 'kept_'); await rig.editor.run();
-  assert(rig.editor.dirty()); assertEquals(rig.editor.result().adopted, false); assert(rig.editor.result().text.includes('acknowledgement unavailable'));
+  assert(rig.editor.dirty()); assertEquals(rig.editor.result().adopted, false); assert(rig.editor.result().text.includes('could not verify receipts for the expected'));
   rig.fireTimers(); assertEquals(rig.closeCount(), 0); rig.editor.dispose(); base.editor.dispose();
 });

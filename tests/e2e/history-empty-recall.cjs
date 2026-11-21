@@ -1,16 +1,12 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const { rejectedNumericCapture } = require('./history-fixtures.cjs');
 
 // Real rejected-but-sealed capture, menu transport and retained archive bytes.
 // Only the accepted close clock is held so lease/DOM observations are deterministic.
 module.exports = async ({ page, evaluate, invoke, list, write, close, open, waitRun, choose, originalId, shot, E }) => {
   await close(); await open('flux-controlnet.png');
-  const { addParameter } = require('./variation-add-helpers.cjs');
-  await addParameter(page, '9.denoise');
-  await page.clickAt('[data-param-key="9.denoise"] .mode-switch button[title="Value"]');
-  await write('[data-param-key="9.denoise"] .vz-value-field input', '1e');
-  await page.clickAt('.vz-run');
-  await page.poll('document.querySelector(".vz-error")?.textContent.includes("number")');
+  await rejectedNumericCapture(page, originalId);
   const invalid = (await list()).items.find(row => row.outcome === 'rejected');
   assert(invalid, 'invalid raw capture remains a selectable, sealed record');
   await close();
@@ -42,12 +38,12 @@ module.exports = async ({ page, evaluate, invoke, list, write, close, open, wait
     await choose(invalid.id);
     await page.poll('document.querySelector(".vh-trigger").getAttribute("aria-expanded")==="false"');
     await shot('empty-overlay-warning');
-    assert.equal(await page.evaluate('document.querySelector(".vh-warning strong").textContent'), 'No compatible changes were applied.');
+    assert.equal(await page.evaluate('document.querySelector(".vh-warning strong").textContent'), `From saved Run ${invalid.id}, applied 0/1 parameters; skipped 1. All unrelated or incompatible current values were kept. Review skipped reasons before running this setup.`);
     await page.poll('window.recallProof.released.length===1');
     assert.equal(await page.evaluate('document.querySelector(".vh-trigger").textContent'), caption);
     assert.equal(await page.evaluate('!!document.querySelector(".vz-discard")'), false);
     assert.equal(await page.evaluate('window.recallProof.timers[0].cleared'), false, 'empty recall preserves the accepted close clock');
-    assert.equal(await page.evaluate('document.querySelector(".vz-queued").textContent'), 'Queued 1 of 1 jobs');
+    assert.equal(await page.evaluate('document.querySelector(".vz-queued").textContent'), '1 confirmed, 0 partial, 0 unknown, 0 unsent; 1 sent.');
     const after = await page.evaluate(`({prefix:document.querySelector('.vz-prefix').value,suffix:document.querySelector('.vz-suffix').value,value:document.querySelector('[data-param-key="9.denoise"] .vz-value-field input').value,opened:window.recallProof.opened.slice(),released:window.recallProof.released.slice()})`);
     assert.deepEqual([after.prefix, after.suffix, after.value], [before.prefix, before.suffix, before.value]);
     assert.deepEqual(after.released, [after.opened.at(-1).leaseId], 'release only the empty selection lease');
@@ -73,7 +69,7 @@ module.exports = async ({ page, evaluate, invoke, list, write, close, open, wait
       window.restoreBusyProbe=()=>{window.busyProof.finishRelease?.();h.open=open;h.release=release};
       return true;
     })()`);
-    const busy = 'Another recall is in progress. This selection was not applied.';
+    let busy;
     const snapshot = () => page.evaluate(`({caption:document.querySelector('.vh-trigger').textContent,fields:[...document.querySelectorAll('.vz-panel input,.vz-panel textarea')].map(e=>[e.getAttribute('aria-label'),e.value,e.checked]),message:document.querySelector('.vz-messages').textContent,timers:window.recallProof.timers.map(t=>t.cleared),opened:window.recallProof.opened.length,released:window.recallProof.released.length})`);
     const outcomes = [];
     let paused = null, opens = [];
@@ -83,6 +79,7 @@ module.exports = async ({ page, evaluate, invoke, list, write, close, open, wait
     try {
       for (const outcome of ['applied', 'error', 'unchanged', 'stale', 'cancelled']) {
         const a = outcome === 'unchanged' ? invalid.id : originalId, b = a === originalId ? invalid.id : originalId;
+        busy = `Still reading saved Run ${a}; selected Run ${b} was not applied. Wait for it to finish, then select the intended Run again.`;
         paused = null;
         const callStart = await page.evaluate('window.busyProof.calls.length'), openStart = opens.length;
         await choose(a);
@@ -90,6 +87,7 @@ module.exports = async ({ page, evaluate, invoke, list, write, close, open, wait
         assert(paused, 'admitted recall reached the real open transport');
         await choose(a);
         assert.equal(await page.evaluate('window.busyProof.calls.length'),callStart+1,'same ID shares admission and one acquisition');
+        await require('./variation-add-helpers.cjs').settledCount(page);
         const untouched = await snapshot();
         await shot('busy-before-' + outcome);
         await choose(b);
@@ -98,7 +96,7 @@ module.exports = async ({ page, evaluate, invoke, list, write, close, open, wait
         assert.equal(await page.evaluate('window.busyProof.calls.length'),callStart+1,'busy B never acquires');
         assert.equal(opens.length,openStart+1);
         const geometry = await page.evaluate(`(()=>{const menu=document.querySelector('.vh-menu:popover-open'),status=menu.querySelector('.vh-status'),label=menu.querySelector('.vh-menu-label'),m=menu.getBoundingClientRect(),s=status.getBoundingClientRect(),l=label.getBoundingClientRect();return {menu:m.toJSON(),status:s.toJSON(),label:l.toJSON(),visible:status.checkVisibility(),top:status.contains(document.elementFromPoint(s.left+s.width/2,s.top+s.height/2)),disabled:menu.querySelectorAll('[disabled]').length}})()`);
-        assert(geometry.visible&&geometry.top&&geometry.status.top>=geometry.label.bottom&&geometry.status.bottom<=geometry.menu.bottom,'notice is visible inside the native popup flow');
+        assert(geometry.visible&&geometry.top&&geometry.status.top>=geometry.label.bottom&&geometry.status.bottom<=geometry.menu.bottom,'notice is visible inside the native popup flow: '+JSON.stringify(geometry));
         assert.equal(geometry.disabled,0);
         await shot('busy-' + outcome);
         if(outcome==='stale') await page.evaluate(`(()=>{window.busyProof.holdRelease=true;const e=document.querySelector('.vz-prefix');e.value='newer_';e.dispatchEvent(new Event('input',{bubbles:true}))})()`);
@@ -110,7 +108,7 @@ module.exports = async ({ page, evaluate, invoke, list, write, close, open, wait
         if(outcome==='error') await page.send('Fetch.fulfillRequest',{requestId:paused,responseCode:503,responseHeaders:[{name:'Content-Type',value:'application/json'}],body:Buffer.from('{"error":"Fixture recall unavailable"}').toString('base64')});
         else await page.send('Fetch.continueRequest',{requestId:paused});
         if(outcome==='cancelled') { await page.poll('!!document.querySelector(".vz-discard")');await page.clickAt('.vz-keep'); }
-        await page.poll(`!document.querySelector('.vh-menu .vh-status')?.textContent.includes('Another recall')`);
+        await page.poll(`!document.querySelector('.vh-menu .vh-status')?.textContent.includes('Still reading saved Run')`);
         if(outcome==='applied') {
           await page.poll('document.querySelector(".vh-trigger").getAttribute("aria-expanded")==="false"');
           assert.equal(await page.evaluate('document.querySelector(\'[data-param-key="9.denoise"] .vz-value-field input\').value'),'0.9');

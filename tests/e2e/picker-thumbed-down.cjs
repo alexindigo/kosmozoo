@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, settledCount } = require('./variation-add-helpers.cjs');
 const { openImageAdd, waitForInputPicker } = require('./image-picker-helpers.cjs');
 const ENGINE = process.env.E2E_ENGINE, FAKE = process.env.E2E_FAKE, OTHER = process.env.E2E_FAKE2, E = process.env.E2E_EVIDENCE;
 const KZ = `(await import('/store/instance.js')).appStore`;
@@ -24,7 +24,7 @@ const control = (base, body) => fetch(base + '/__test/activity', { method: 'POST
   const waitName = name => page.poll(present(name), 15000);
   const root = value => page.clickAt(`.vz-input-feeds [data-value="${value}"]`);
   const selected = () => evaluate(`[...document.querySelectorAll('.vz-image-tile')].map(el=>({name:el.dataset.imageName,kind:el.dataset.imageKind}))`);
-  const count = () => evaluate(`document.querySelector('.vz-count').textContent`);
+  const count = () => settledCount(page);
   try {
     const graph = { '11': { class_type: 'LoadImage', inputs: { image: NAME } }, '14': { class_type: 'SaveImage', inputs: { images: ['11', 0], filename_prefix: 'visibility' } } };
     assert((await control(FAKE, { reset: true, publishInputs: [{ name: NAME, fixture: 'flux-basic.png' }], publish: [
@@ -56,6 +56,7 @@ const control = (base, body) => fetch(base + '/__test/activity', { method: 'POST
     await invoke('preference.revealDown'); await waitName(NAME);
     assert.equal(catalogues.length, reads, 'reveal reprojects the cached catalogue');
     await page.clickAt(option(NAME));
+    await settledCount(page, '1', { and: `!document.querySelector('.vz-run').disabled`, timeout: 15000 });
     const chosen = await selected(), chosenCount = await count();
     assert.equal(chosen.length, 2); assert.equal(chosenCount, '1');
     await invoke('preference.revealDown');

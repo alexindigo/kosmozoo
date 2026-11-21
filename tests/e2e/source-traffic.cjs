@@ -18,7 +18,11 @@ async function observeSources(page) {
   const validate = async () => {
     const { validateSourceSnapshot } = await import(workPath('client/js/source-events.mjs'));
     for (const frame of frames) {
-      assert.equal(frame.name,'sources'); const snapshot=validateSourceSnapshot(JSON.parse(frame.data));
+      assert.equal(frame.name,'sources');
+      const request = requests.find(request => request.id === frame.id);
+      assert(request, 'source frame belongs to an observed request');
+      const items = new URL(request.url).searchParams.get('arrivals') === 'items-v1';
+      const snapshot=validateSourceSnapshot(JSON.parse(frame.data), { items });
       assert.equal(frame.eventId,`${snapshot.epoch}:${snapshot.revision}`);
     }
   };

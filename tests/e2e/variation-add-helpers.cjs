@@ -21,4 +21,22 @@ async function removeRecordedImage(cdp, id) {
   await cdp.clickAt(`${tile} .vz-image-remove button`);
   await cdp.poll(`!document.querySelector(${JSON.stringify(tile)})`);
 }
-module.exports = { addParameter, toggleParameter, removeRecordedImage };
+// The Variations count is planned by the engine after a debounce. Its aria-busy
+// is the product's settledness signal: read or compare it only once settled.
+// `expected` is exact text, or { test } over `count`/`el`; `and` adds page state.
+async function settledCount(cdp, expected, { and = 'true', timeout = 20000 } = {}) {
+  const test = expected === undefined ? 'true' : typeof expected === 'object' ? expected.test : `count===${JSON.stringify(String(expected))}`;
+  const probe = `(()=>{const el=document.querySelector('.vz-count');if(!el||el.getAttribute('aria-busy')!=='false')return null;const count=el.textContent;return (${test})&&(${and})?{count}:null})()`;
+  try { return (await cdp.poll(probe, timeout)).count; }
+  catch (error) {
+    error.message += ' settledCount ' + JSON.stringify({ expected, and, observed: await cdp.evaluate(`(()=>{const el=document.querySelector('.vz-count');return el&&{count:el.textContent,busy:el.getAttribute('aria-busy')}})()`) });
+    throw error;
+  }
+}
+// Scenario command port: an intended Run waits for the same public admission
+// settlement as the native button. Invalid raw values still reach Run unchanged.
+const variationInvoker = (cdp, store) => async (id, args = {}) => {
+  if (id === 'variations.run') await settledCount(cdp);
+  return cdp.evaluate(`(async()=>${store}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
+};
+module.exports = { addParameter, toggleParameter, removeRecordedImage, settledCount, variationInvoker };

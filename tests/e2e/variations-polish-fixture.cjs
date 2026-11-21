@@ -3,7 +3,7 @@ const { addParameter } = require('./variation-add-helpers.cjs');
 
 // The range and row-shell regressions share one four-kind public fixture.
 module.exports = async ({ cdp, FAKE, KZ, name }, run) => {
-  const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
+  const invoke = require('./variation-add-helpers.cjs').variationInvoker(cdp,KZ);
   const post = async body => {
     const r = await fetch(FAKE + '/__test/activity', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     assert(r.ok, `fixture: ${r.status}`);

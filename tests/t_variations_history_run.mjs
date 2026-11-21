@@ -7,7 +7,61 @@ import { numericDefaults, editorDomain } from "../client-solid/features/variatio
 import { encodeHistoryRecipe } from "../src/features/variations/history-codec.mjs";
 import { parameterCurrent, parseExactJson, stringifyExactJson } from "../src/parameters.mjs";
 import { snapshotDraft } from "../src/features/variations/recipe-model.mjs";
+import { isEntryPath } from "../src/entry-path.mjs";
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
+
+Deno.test("history HTTP: newline text variations queue only addressable prefixes and retain exact values", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "kz-safe-names-" }), jobs = [];
+  const graph = { text: { class_type: "Text", inputs: { value: "original" } },
+    save: { class_type: "SaveImage", inputs: { filename_prefix: "source", images: ["text", 0] } } };
+  const png = testPng(10, 10, undefined, graph);
+  const fake = Deno.serve({ hostname: "127.0.0.1", port: 0, onListen() {} }, async req => {
+    const url = new URL(req.url);
+    if (url.pathname === "/api/object_info") return Response.json({ SaveImage: { output_node: true, input: {} } });
+    if (url.pathname === "/api/view") return new Response(req.method === "HEAD" ? null : png, { headers: { ETag: '"fixture"', "Content-Length": String(png.length) } });
+    if (url.pathname === "/api/prompt") {
+      jobs.push(parseExactJson(await req.text()));
+      return Response.json({ prompt_id: `safe-${jobs.length}`, node_errors: {} });
+    }
+    return new Response(null, { status: 404 });
+  });
+  const engine = await buildContext({ start: false, env: { HOME: dir, KOZMOZOO_STATE: dir,
+    KOZMOZOO_CACHE: `${dir}/cache`, KOZMOZOO_HOSTS: `fake=127.0.0.1:${fake.addr.port}`, KOZMOZOO_PLUGINS: `${dir}/no-plugins` } });
+  const call = async (method, path, body) => {
+    const response = await engine.router.handle(new Request(`http://localhost/api/features/variations${path}`, {
+      method, headers: body === undefined ? {} : { "Content-Type": "application/json" },
+      ...(body === undefined ? {} : { body: stringifyExactJson(body) }),
+    }));
+    return { status: response.status, data: parseExactJson(await response.text()) };
+  };
+  try {
+    await engine.ctx.ingest.ensure("fake", "source_00001_.png");
+    const probe = (await call("GET", "/probe/fake%3Asource_00001_.png")).data;
+    const recipe = makeVariationRecipe();
+    recipe.seed("naming", "root", {}, { prefix: "", suffix: "" });
+    recipe.seed("texts", "text.value", probe.parameters.find(p => p.id === "text.value"),
+      { enabled: true, text: "\n{{place}}\r\nwith zero bulk.\n", tpl: { place: "Chedi Daan;Temple" } });
+    const runId = crypto.randomUUID(), encoded = encodeHistoryRecipe(recipe.capture(), runId);
+    const target = { id: "fake:source_00001_.png", host: "fake", filename: "source_00001_.png", origin: probe.context.origin, context: probe.context };
+    assertEquals((await call("POST", "/history", { runId, format: 1, cohortMode: "single", targets: [target], recipe: encoded.recipe, resources: encoded.resources })).status, 200);
+    const prepared = await call("POST", `/history/${runId}/prepare`);
+    assertEquals(prepared.status, 200, stringifyExactJson(prepared));
+    const plan = await call("POST", `/history/${runId}/prepare-target`, { targetIndex: 0, origin: target.origin, snapshotHash: prepared.data.snapshotHash });
+    assertEquals(plan.status, 200, stringifyExactJson(plan));
+    const result = await call("POST", "/run", plan.data.request);
+    assertEquals(result.status, 200, stringifyExactJson(result)); assertEquals(result.data.submitted, 2);
+    assertEquals(jobs.length, 2);
+    for (const [index, place] of ["Chedi Daan", "Temple"].entries()) {
+      const job = jobs[index];
+      assert(isEntryPath(job.prompt.save.inputs.filename_prefix));
+      const value = `\n${place}\r\nwith zero bulk.\n`;
+      const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))), byte => byte.toString(16).padStart(2, "0")).join("").slice(0, 6);
+      assertEquals(job.prompt.save.inputs.filename_prefix, `source_00001__${place === "Chedi Daan" ? "Chedi_Daan" : "Temple_wit"}~${digest}`);
+      assertEquals(job.prompt.text.inputs.value, value);
+      assertEquals(job.extra_data.extra_pnginfo.kz.params["text.value"], job.prompt.text.inputs.value);
+    }
+  } finally { await engine.close(); await fake.shutdown(); }
+});
 
 function recipeFor(catalogue) {
   const r = makeVariationRecipe();
@@ -116,9 +170,24 @@ Deno.test("history HTTP: immutable raw capture/archive barrier, engine plan and 
     const plan = await call("POST", `/history/${id}/prepare-target`, { targetIndex: 0, origin, snapshotHash: prepared.data.snapshotHash });
     assertEquals(plan.status, 200, stringifyExactJson(plan));
     assertEquals((await call("POST", `/history/${id}/prepare-target`, { targetIndex: 0, origin, snapshotHash: prepared.data.snapshotHash })).data, plan.data);
-    const submitted = await call("POST", "/run", plan.data.request);
+    const heldReply = { entered: deferred(), release: deferred() }; promptGates.push(heldReply);
+    const sending = call("POST", "/run", plan.data.request);
+    await heldReply.entered.promise;
+    let sendingDetail, sendingList;
+    try {
+      sendingDetail = (await call("GET", `/history/${id}`)).data;
+      assertEquals(sendingDetail.submission, { sent: 1, total: 1 });
+      assertEquals(sendingDetail.summary.submitted, 0, "body-written progress never claims queue acceptance");
+      sendingList = (await call("GET", "/history")).data.items.find(item => item.id === id);
+      assertEquals(sendingDetail.effects.find(effect => effect.kind === "permutation").state, "started");
+    } finally { heldReply.release.resolve(); }
+    const submitted = await sending;
+    assertEquals(sendingDetail.summary.effects, { sent: 1, confirmed: 0, partial: 0, unknown: 1, unsent: 0 });
+    assertEquals(sendingList.summary.effects, sendingDetail.summary.effects);
     assertEquals(submitted.status, 200, stringifyExactJson(submitted));
     assertEquals(submitted.data.submitted, 1);
+    assertEquals(submitted.data.effectCounts, { sent: 1, confirmed: 1, partial: 0, unknown: 0, unsent: 0 });
+    assertEquals((await call("GET", `/history/${id}`)).data.submission, { sent: 1, total: 1 });
     assertEquals(parseExactJson(jobs[0]).prompt.n.inputs.seed, 18446744073709551614n);
     assertEquals((await call("POST", "/run", plan.data.request)).data, submitted.data);
     assertEquals((await call("POST", "/run", { ...plan.data.request, history: { ...plan.data.request.history, planHash: "0".repeat(64) } })).status, 409);
@@ -172,8 +241,19 @@ Deno.test("history HTTP: immutable raw capture/archive barrier, engine plan and 
       if (mode === "storage-failure") {
         assertEquals(result.status, 500);
         assert(result.data.error.includes("receipt disk failure"));
+        assertEquals(result.data.problem.code, "dispatch-tracking");
+        assertEquals(result.data.problem.effects.unknown, 1);
         assertEquals(engine.ctx.store.variationEffects(runId).find(e => e.kind === "permutation").state, "started");
-      } else assertEquals(result.data.outcome, mode === "partial" ? "partial-effects" : "uncertain-effects");
+      } else {
+        assertEquals(result.data.outcome, mode === "partial" ? "partial-effects" : "uncertain-effects");
+        assertEquals(result.data.effectCounts, { sent: 1, confirmed: 0, partial: mode === "partial" ? 1 : 0, unknown: mode === "uncertain" ? 1 : 0, unsent: 0 });
+        assertEquals(result.data.errors[0].problem.target.name, nextTarget.filename);
+      }
+      const detail = (await call("GET", `/history/${runId}`)).data;
+      assertEquals(detail.summary.effects.confirmed, 0);
+      assertEquals(detail.summary.effects[mode === "partial" ? "partial" : "unknown"], 1);
+      assert(detail.summary.problems.length > 0);
+      assertEquals(detail.summary.problems[0].target.name, nextTarget.filename);
       assertEquals(jobs.length, before + 1);
       await call("POST", "/run", p.data.request);
       assertEquals(jobs.length, before + 1, "repeated partial/uncertain dispatch never re-enters enqueue");
@@ -185,9 +265,30 @@ Deno.test("history HTTP: immutable raw capture/archive barrier, engine plan and 
     invalidRecipe.numeric["n.seed"].values.value = "1e";
     const invalid = encodeHistoryRecipe(invalidRecipe, invalidId), beforeInvalid = { jobs: jobs.length, uploads: uploads.length };
     assertEquals((await call("POST", "/history", { runId: invalidId, format: 1, cohortMode: "single", targets: [nextTarget], recipe: invalid.recipe, resources: invalid.resources })).status, 200);
-    assertEquals((await call("POST", `/history/${invalidId}/prepare`)).status, 400);
-    assertEquals((await call("POST", `/history/${invalidId}/prepare`)).status, 400);
+    const invalidPrepared = await call("POST", `/history/${invalidId}/prepare`);
+    assertEquals(invalidPrepared.status, 200);
+    assertEquals(invalidPrepared.data.outcome, "rejected");
+    assert(invalidPrepared.data.admission[0].problem.message.includes("Enter a number"));
+    assertEquals((await call("POST", `/history/${invalidId}/prepare`)).data.admission, invalidPrepared.data.admission);
     assertEquals((await call("GET", `/history/${invalidId}`)).data.recipe.numeric["n.seed"].values.value, "1e");
+    assertEquals({ jobs: jobs.length, uploads: uploads.length }, beforeInvalid);
+    const overId = crypto.randomUUID(), overRecipe = snapshotDraft(opened.data.recipe);
+    Object.assign(overRecipe.numeric["n.seed"].values, { mode: "range", min: "1", max: "1020", rawIncrement: "1" });
+    const over = encodeHistoryRecipe(overRecipe, overId);
+    const overCapture = { runId: overId, format: 1, cohortMode: "single", targets: [nextTarget], recipe: over.recipe, resources: over.resources };
+    const preview = await call("POST", "/plan", overCapture);
+    assertEquals(preview.data[0].count, 1020, stringifyExactJson(preview));
+    assertEquals(preview.data[0].problem.code, "too-many");
+    assertEquals((await call("POST", "/history", overCapture)).status, 200);
+    const overPrepared = await call("POST", `/history/${overId}/prepare`);
+    assertEquals(overPrepared.status, 200, stringifyExactJson(overPrepared));
+    assertEquals(overPrepared.data.admission, preview.data);
+    assertEquals(overPrepared.data.outcome, "rejected");
+    assertEquals(overPrepared.data.summary.total, 0, "workload size cannot become admitted submission work");
+    const overBody = { targetIndex: 0, origin: nextTarget.origin, snapshotHash: overPrepared.data.snapshotHash };
+    const overResource = Object.values(overPrepared.data.targets[0].graphResources)[0];
+    assertEquals((await call("POST", `/history/${overId}/uploads/0-${overResource}`, { ...overBody, resourceId: overResource })).status, 409);
+    assertEquals((await call("POST", `/history/${overId}/prepare-target`, overBody)).status, 409);
     assertEquals({ jobs: jobs.length, uploads: uploads.length }, beforeInvalid);
     acceptance = "confirmed";
     const largeId = crypto.randomUUID(), largeRecipe = snapshotDraft(opened.data.recipe);
@@ -296,7 +397,11 @@ Deno.test("history HTTP: immutable raw capture/archive barrier, engine plan and 
     const address = engine.ctx.hosts.fake;
     engine.ctx.hosts.fake = "127.0.0.1:1"; fencedGate.release.resolve();
     try {
-      assertEquals((await fencedUpload).status, 412);
+      const fencedResult = await fencedUpload;
+      assertEquals(fencedResult.status, 412);
+      assertEquals(fencedResult.data.problem.code, "upload-retired");
+      assertEquals(fencedResult.data.problem.stage, "after");
+      assertEquals(fencedResult.data.problem.uploaded.origin, nextTarget.origin);
       const effect = engine.ctx.store.variationEffects(fencedId).find(e => e.kind === "upload");
       assertEquals(effect.state, "confirmed", "a source fence cannot undo an actual old-origin receipt");
       assertEquals(parseExactJson(effect.result_json).origin, nextTarget.origin);

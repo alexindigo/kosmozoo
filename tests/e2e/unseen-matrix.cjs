@@ -220,7 +220,7 @@ async function run(page){
     // A partial native source popup covers just this tiny loaded image. Its
     // visibility change must expose it without scrolling or a global veto.
     await page.send('Emulation.setDeviceMetricsOverride',{width:800,height:900,deviceScaleFactor:1,mobile:false});await anchor();
-    const popup=await publish('popup.png',{width:20,height:20});await invoke('keys.panel.toggle');await reveal(popup);await invoke('source.menu.open');
+    const popup=await publish('popup.png',{width:20,height:20,mtime:4102445002});await invoke('keys.panel.toggle');await reveal(popup);await invoke('source.menu.open');
     await page.evaluate(`(()=>{const image=document.querySelector('.card[data-name="${popup}"] img'),menu=document.querySelector('#hostDrop'),col=document.querySelector('#candidatesCol');const a=image.getBoundingClientRect(),b=menu.getBoundingClientRect();col.scrollTop+=(a.top+a.height/2)-(b.top+b.height/2);})()`);await frame();
     const popupGeometry=await page.evaluate(`(()=>{const a=document.querySelector('.card[data-name="${popup}"] img').getBoundingClientRect(),b=document.querySelector('#hostDrop').getBoundingClientRect();return {covered:a.left>=b.left&&a.right<=b.right&&a.top>=b.top&&a.bottom<=b.bottom,scroll:document.querySelector('#candidatesCol').scrollTop};})()`);
     assert(popupGeometry.covered,'actual native popup fully covers the media rectangle');await invoke('keys.panel.close');await frame();assert(await page.evaluate(has(popup)));

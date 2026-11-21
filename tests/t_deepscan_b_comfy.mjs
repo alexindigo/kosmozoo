@@ -42,7 +42,7 @@ Deno.test("deepscan B listing: linear parser agrees with the annotation grammar 
   for (let i = 0; i < 10_000; i++) {
     let value = "";
     for (let j = 0; j < 20; j++) { state = (state * 1664525 + 1013904223) >>> 0; value += alphabet[state % alphabet.length]; }
-    const match = /^(.*)\s+\[([^\]]*)\]$/.exec(value);
+    const match = /^(.*)\s+\[([^\]]*)\]$/s.exec(value);
     const expected = match ? { name: match[1], size: /^\d+$/.test(match[2]) ? Number(match[2]) : null } : { name: value, size: null };
     assertEquals(parseListingEntry(value), expected, JSON.stringify(value));
   }

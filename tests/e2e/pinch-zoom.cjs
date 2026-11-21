@@ -51,7 +51,12 @@ const card = name => `.card[data-name="${name}"]`;
       if (edge === 'bottom') {
         const shot = await page.send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out + '/before-edge-pinch.png', Buffer.from(shot.data, 'base64'));
       }
-      await wheel(p, d); await wheel(p, d); await wheel(p, -20, true); await sleep(400);
+      // Queue one native burst without Node-side sleeps or per-command round
+      // trips spending the product's 120ms hold before the pinch can arrive.
+      await Promise.all([wheel(p, d, false, 0), wheel(p, d, false, 0), wheel(p, -20, true, 0)]); await sleep(400);
+      const wheels = await page.evaluate('trace.filter(event=>event.kind==="wheel")');
+      const first = wheels.find(event => !event.ctrl), pinch = wheels.find(event => event.ctrl);
+      assert(first && pinch && pinch.t - first.t < 120, 'native pinch arrives inside the held-wheel interval');
       const after = await state(); assert(after.scale > 1.1, 'image zooms'); assert.equal(after.top, before.top, 'feed stays fixed');
       if (edge === 'bottom') {
         const shot = await page.send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(out + '/edge-pinch.png', Buffer.from(shot.data, 'base64'));

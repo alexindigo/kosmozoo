@@ -2,9 +2,9 @@
 const assert=require('node:assert/strict');
 const { pickInput } = require('./image-picker-helpers.cjs');
 const { freshRecipe } = require('./recipe-helpers.cjs');
-const { addParameter, toggleParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, toggleParameter, settledCount, removeRecordedImage } = require('./variation-add-helpers.cjs');
 module.exports=async({cdp,FAKE,KZ,check})=>{
-  const invoke=(id,args={})=>cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
+  const invoke=async(id,args={})=>{if(id==='variations.run')await settledCount(cdp);return cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);};
   const open=async(file='flux-basic.png',fresh=true)=>{await invoke('variations.open',{id:'fake:'+file});await cdp.poll("document.querySelectorAll('.vz-catalogue-row').length>0");if(fresh)await freshRecipe(cdp);await addParameter(cdp,'9.denoise');};
   const type=async(selector,text)=>{await cdp.clickAt(selector);await cdp.evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.focus();e.select()})()`);await cdp.send('Input.insertText',{text});await cdp.poll(`document.querySelector(${JSON.stringify(selector)}).value===${JSON.stringify(text)}`);};
   const enqueues=async()=>await(await fetch(FAKE+'/__test/enqueues')).json();
@@ -15,6 +15,7 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
   };
   const dirtyClose=async()=>{await cdp.clickAt('.vz-close');await cdp.poll("!!document.querySelector('.vz-discard')");await cdp.clickAt('.vz-discard-confirm');await cdp.poll("!document.querySelector('.vz-panel')");};
   const held=async()=>{
+    await settledCount(cdp);
     await cdp.evaluate(`(()=>{window.__ackFetch=window.fetch;window.__ackFinish=null;window.fetch=(url,options)=>{
       const task=window.__ackFetch(url,options);return String(url).includes('/features/variations/run')?task.then(response=>new Promise(resolve=>window.__ackFinish=()=>resolve(response))):task}})()`);
     await cdp.evaluate(`(async()=>{window.__ackRun=${KZ}.handles.invoke('variations.run');return true})()`);
@@ -100,7 +101,7 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
     await cdp.evaluate(`(()=>{window.__ackFetch=window.fetch;window.fetch=(url,options)=>window.__ackFetch(url,options).then(async response=>{
       if(!String(url).includes('/features/variations/run'))return response;const data=await response.json();data.acknowledgement.requestId='foreign';return new Response(JSON.stringify(data),{status:200})})})()`);
     const count=(await enqueues()).length;await invoke('variations.run');await stays();
-    assert(await cdp.evaluate("document.querySelector('.vz-error').textContent.includes('acknowledgement unavailable')"));
+    assert(await cdp.evaluate("document.querySelector('.vz-messages').textContent.includes('binding, count or operation coverage mismatch')"));
     assert((await enqueues()).length>count);await cdp.evaluate("window.fetch=window.__ackFetch");await dirtyClose();
     check('actual queued work with foreign acknowledgement keeps edits and reports unavailable proof without retry',true);
 
@@ -130,6 +131,7 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
     check('actual ordered per-node enum picks are acknowledged and permit clean close',true);
 
     await open('flux-controlnet.png');await addParameter(cdp,'43.image');
+    await removeRecordedImage(cdp,'43.image');
     await pickInput(cdp, 'ref.png');
     const newStart=(await enqueues()).length;assert.equal((await invoke('variations.run')).status,'submitted');
     assert((await enqueues()).slice(newStart).every(job=>job.prompt['43'].inputs.image==='ref.png'));
@@ -137,8 +139,10 @@ module.exports=async({cdp,FAKE,KZ,check})=>{
     check('actual selected existing input filename is acknowledged and permits clean close',true);
 
     await open('flux-controlnet.png');await addParameter(cdp,'43.image');
+    await removeRecordedImage(cdp,'43.image');
     await cdp.poll("!!document.querySelector('.vz-imgfilespick')");
-    await cdp.evaluate("(()=>{const e=document.querySelector('.vz-imgfilespick'),data=new DataTransfer();data.items.add(new File(['a'],'ack-a.png',{type:'image/png'}));data.items.add(new File(['b'],'ack-b.png',{type:'image/png'}));e.files=data.files;e.dispatchEvent(new Event('change',{bubbles:true}));window.__ackFiles=[...e.files];window.__ackInput=e})()");
+    await cdp.evaluate("(async()=>{const e=document.querySelector('.vz-imgfilespick'),data=new DataTransfer();for(const [name,fixture]of [['ack-a.png','flux-lora.png'],['ack-b.png','flux-controlnet.png']]){const bytes=await(await fetch('/api/collections/fake/entries/'+fixture+'/bytes')).arrayBuffer();data.items.add(new File([bytes],name,{type:'image/png'}))}e.files=data.files;e.dispatchEvent(new Event('change',{bubbles:true}));window.__ackFiles=[...e.files];window.__ackInput=e})()");
+    await cdp.poll("document.querySelectorAll('[data-image-kind=upload]').length===2&&!document.querySelector('.vz-image-check')");
     const fileStart=(await enqueues()).length;assert.equal((await invoke('variations.run')).status,'submitted');
     const fileJobs=(await enqueues()).slice(fileStart);assert.deepEqual([...new Set(fileJobs.map(job=>job.prompt['43'].inputs.image))],['ack-a.png','ack-b.png']);
     assert(await cdp.evaluate("document.querySelector('.vz-imgfilespick')===window.__ackInput && [...window.__ackInput.files].every((file,i)=>file===window.__ackFiles[i])"));

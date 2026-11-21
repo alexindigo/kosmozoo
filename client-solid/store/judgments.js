@@ -13,7 +13,7 @@ function normalize(field, value) {
   return Object.keys(notes).length ? notes : null;
 }
 
-export function makeJudgments({ entryFor, apply, write, onError }) {
+export function makeJudgments({ entryFor, apply, write, onError, onDownVote }) {
   const writes = new Map();
   const reads = new Set();
   let revision = 0;
@@ -42,7 +42,7 @@ export function makeJudgments({ entryFor, apply, write, onError }) {
     writes.delete(id);
   }
 
-  function dispatch(id, intent) {
+  function issue(id, intent, changes) {
     let pending, patch, commandRevision;
     try {
       if (typeof id !== "string") throw new Error("entry ID required");
@@ -76,6 +76,13 @@ export function makeJudgments({ entryFor, apply, write, onError }) {
       }));
       if (!Object.keys(patch).length) throw new Error("empty judgment patch");
       pending = recordFor(id, entry);
+      const previousVote = pending.fields.vote?.active ? pending.fields.vote.desired
+        : normalize("vote", entry ? entry.judgment?.vote : pending.fields.vote?.desired);
+      if (onDownVote && patch.vote === "down" && previousVote !== "down") {
+        const key = {};
+        pending.held.add(key);
+        changes.push({ id, filename: pending.filename, vote: previousVote, record: pending, key });
+      }
       commandRevision = ++revision;
       for (const [field, value] of Object.entries(patch)) {
         let state = pending.fields[field];
@@ -116,8 +123,48 @@ export function makeJudgments({ entryFor, apply, write, onError }) {
     return pending.promise;
   }
 
+  function release(changes) {
+    for (const item of changes) {
+      item.record.held.delete(item.key);
+      reclaim(item.id, item.record);
+    }
+  }
+
+  function dispatchMany(ids, intent) {
+    const requests = ids.map(id => {
+      const changes = [];
+      return { changes, promise: issue(id, intent, changes) };
+    });
+    return Promise.all(requests.map(async request => ({ changes: request.changes, result: await request.promise }))).then(results => {
+      const accepted = results.flatMap(item => item.result.ok ? item.changes : []);
+      release(results.flatMap(item => item.result.ok ? [] : item.changes));
+      if (accepted.length) {
+        let live = true;
+        const dispose = () => { if (live) { live = false; release(accepted); } };
+        onDownVote({
+          entries: accepted.map(({ id, filename, vote }) => ({ id, filename, vote })),
+          dispose,
+          undo() {
+            if (!live) return Promise.resolve([]);
+            // Admit each restore before releasing its captured address, including
+            // when the user has navigated away from the original collection.
+            const restoring = accepted.map(item => issue(item.id, { type: "set", patch: { vote: item.vote } }, []));
+            dispose();
+            return Promise.all(restoring);
+          },
+        });
+      }
+      return results.map(item => item.result);
+    });
+  }
+
+  function dispatch(id, intent) {
+    return dispatchMany([id], intent).then(results => results[0]);
+  }
+
   return {
     dispatch,
+    dispatchMany,
     retain(id, key) {
       const entry = entryFor(id);
       if (!entry && !writes.get(id)?.fields.notes) return failed(`notes unavailable: ${id}`);

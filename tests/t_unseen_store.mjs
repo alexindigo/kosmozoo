@@ -91,3 +91,17 @@ for(const state of ['hidden','gone'])Deno.test(`unseen Store: authoritative ${st
   await publish(projection(3,2,[[1,1]]),[row('old.png',1),{...row('new.png',2),state}]);
   assert(!store.state.entryHasNew('h:new.png'));assert(!store.state.sourceHasNew('h'));assert(!store.state.anySourceHasNew());
 }));
+
+Deno.test('unseen Store: all attention readers reproject live preferences without consuming hidden votes',()=>withStore(async({store,row,publish})=>{
+  const down={...row('down.png',2),judgment:{vote:'down'}};
+  const votes={downVotedRanges:[[2,2]],upVotedRanges:[]};
+  await publish({...projection(2,2),...votes},[row('old.png',1),down]);
+  const readers=()=>[store.state.sourceHasNew('h'),store.state.anySourceHasNew(),store.state.entryHasNew('h:down.png')];
+  assertEquals(readers(),[false,false,false]);
+  await store.handles.invoke('preference.revealDown');assertEquals(readers(),[true,true,true]);
+  await store.handles.invoke('preference.revealDown');assertEquals(readers(),[false,false,false]);
+  await store.actions.judgments.setDownvoteHides(false);assertEquals(readers(),[true,true,true]);
+  await store.actions.judgments.setDownvoteHides(true);assertEquals(readers(),[false,false,false]);
+  await publish({...projection(3,2),downVotedRanges:[],upVotedRanges:[[2,2]]},[row('old.png',1),{...down,judgment:{vote:'up'}}]);
+  assertEquals(readers(),[true,true,true]);
+}));

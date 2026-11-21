@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
 const { addParameter } = require('./variation-add-helpers.cjs');
 module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
-  const invoke = (id,args={}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
+  const invoke = require('./variation-add-helpers.cjs').variationInvoker(cdp,KZ);
   const http = async (base,path,method='GET',body) => {
     const response = await fetch(base+path,{method,headers:body?{'Content-Type':'application/json'}:undefined,body:body?JSON.stringify(body):undefined});
     assert(response.ok,`${path}: ${response.status}`); return response.json();
@@ -30,8 +30,7 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     assert(geometry.messageHeight<=geometry.sidebarHeight*.4+1,JSON.stringify(geometry));
     assert(await cdp.evaluate("(()=>{const body=document.querySelector('.vz-sidebar-body'),saved=body.scrollTop,box=body.getBoundingClientRect();body.scrollTop=0;const first=body.firstElementChild.getBoundingClientRect().top>=box.top-1;body.scrollTop=body.scrollHeight;const last=body.lastElementChild.getBoundingClientRect().bottom<=box.bottom+1;body.scrollTop=saved;return first&&last})()"));
     if(expectOverflow){
-      assert(geometry.messageScroll>geometry.messageHeight&&geometry.messageOverflow==='auto',JSON.stringify(geometry));
-      assert(await cdp.evaluate("(()=>{const messages=document.querySelector('.vz-messages');messages.scrollTop=messages.scrollHeight;const scrolled=messages.scrollTop>0;messages.scrollTop=0;return scrolled})()"));
+      assert(await cdp.evaluate("(()=>{const content=document.querySelector('.vz-message-content');return getComputedStyle(content).webkitLineClamp==='3'&&content.scrollHeight>content.clientHeight&&content.parentElement.title.length>2000})()"));
     }
   };
   const graph = {
@@ -62,11 +61,17 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     await addParameter(cdp,'2.text');await type('.vz-text-values','{{parked}}');await type('.vz-tpl-input','one; two');await type('.vz-text-values','literal submitted');
     for(const id of ['470.image','475.image'])await addParameter(cdp,id);
     await require('./variation-add-helpers.cjs').removeRecordedImage(cdp,'470.image');
-    await cdp.evaluate(`(async()=>{const bytes=await(await fetch('/api/collections/fake/entries/flux-lora.png/bytes')).arrayBuffer();
-      window.__recipeFiles=['#%.png','question?.png','spaces Ω [input].png'].map(name=>new File([bytes],name,{type:'image/png'}));
+    const { testPng } = await import('../helpers/png.mjs');
+    const fileBytes=[0,1,2].map(index=>Buffer.from(testPng(48,32,[index*80,60,120,255])).toString('base64'));
+    await cdp.evaluate(`(async()=>{const bytes=await(await fetch('/api/collections/fake/entries/flux-lora.png/bytes')).arrayBuffer(),encoded=${JSON.stringify(fileBytes)};
+      window.__recipeFiles=['#%.png','question?.png','spaces Ω [input].png'].map((name,index)=>new File([Uint8Array.from(atob(encoded[index]),c=>c.charCodeAt(0))],name,{type:'image/png'}));
       window.__recipeDormant=new File([bytes],'dormant.png',{type:'image/png'});
       for(const [id,files] of [['470.image',window.__recipeFiles],['475.image',[window.__recipeDormant]]]){const input=document.querySelector('[data-image-id="'+id+'"] .vz-imgfilespick'),dt=new DataTransfer();files.forEach(file=>dt.items.add(file));input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}))}})()`);
-    await cdp.clickAt('[data-image-id="475.image"] .vz-parameter-remove');await cdp.clickAt('[data-param-key="9.denoise"] .vz-parameter-remove');
+    await cdp.poll("document.querySelectorAll('[data-image-kind=upload]').length===4&&!document.querySelector('.vz-image-check')");
+    await cdp.clickAt('[data-image-id="475.image"] .vz-parameter-remove');
+    await cdp.poll("!document.querySelector('[data-image-id=\"475.image\"]')");
+    await cdp.clickAt('[data-param-key="9.denoise"] .vz-parameter-remove');
+    await cdp.poll("!document.querySelector('[data-param-key=\"9.denoise\"]')");
     await type('.vz-suffix','_{470.image}');await cdp.poll("!document.querySelector('.vz-image-check')");
     await capture('recipe-captured');const before=(await jobs()).length;
     assert.equal((await invoke('variations.run')).adopted,true);
@@ -83,13 +88,14 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     await addParameter(cdp,'475.image');await cdp.poll("!!document.querySelector('[data-image-id=\"475.image\"].on .vz-parameter-remove')");
     await require('./variation-add-helpers.cjs').removeRecordedImage(cdp,'475.image');
     await cdp.poll("document.querySelectorAll('[data-image-id=\"475.image\"] .vz-image-tile').length===0");
-    let count=(await jobs()).length;assert.equal((await invoke('variations.run')).adopted,false);assert.equal((await jobs()).length,count);
-    assert(await cdp.evaluate("document.querySelector('.vz-error').textContent.includes('at least one image')"));
+    let count=(await jobs()).length;assert.equal((await invoke('variations.run')).status,'invalid');assert.equal((await jobs()).length,count);
+    assert(await cdp.evaluate("document.querySelector('.vz-messages').textContent.includes('at least one image')"));
     await cdp.clickAt('[data-image-id="475.image"] .vz-parameter-remove');await cdp.poll("!document.querySelector('[data-image-id=\"475.image\"]')");
     await type('.vz-suffix','_{unknown}');
     count=(await jobs()).length;await invoke('variations.run');assert.equal((await jobs()).length,count);
-    assert(await cdp.evaluate("document.querySelector('.vz-error').textContent.includes('naming token')"),await cdp.evaluate("document.querySelector('.vz-error').textContent"));
+    assert(await cdp.evaluate("document.querySelector('.vz-messages').textContent.includes('token')"),await cdp.evaluate("document.querySelector('.vz-messages').textContent"));
     await fixedSummary();await capture('recipe-preflight');
+    await type('.vz-suffix','');
     await cdp.evaluate(`(()=>{const original=window.fetch;window.__recipeLongRestore=()=>window.fetch=original;window.fetch=(url,options)=>String(url).includes('/features/variations/run')?Promise.resolve(new Response(JSON.stringify({error:'Long preflight reason: '+('This operation cannot be applied. '.repeat(200))}),{status:400})):original(url,options)})()`);
     try{count=(await jobs()).length;await invoke('variations.run');assert.equal((await jobs()).length,count);await fixedSummary(true);await capture('recipe-long-error');}
     finally{await cdp.evaluate('window.__recipeLongRestore()')}
@@ -99,14 +105,17 @@ module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
     await require('./variation-add-helpers.cjs').removeRecordedImage(cdp,'470.image');
     await cdp.evaluate(`(async()=>{const bytes=await(await fetch('/api/collections/fake/entries/flux-lora.png/bytes')).arrayBuffer(),input=document.querySelector('[data-image-id="470.image"] .vz-imgfilespick'),dt=new DataTransfer();dt.items.add(new File([bytes],'x'.repeat(196)+'.png',{type:'image/png'}));input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()`);
     await cdp.poll("!!document.querySelector('[data-image-id=\"470.image\"].on .vz-parameter-remove')&&!document.querySelector('.vz-image-check')");count=(await jobs()).length;
+    await require('./variation-add-helpers.cjs').settledCount(cdp);
+    const displayedExample=await cdp.evaluate("document.querySelector('.vz-output-example').textContent");
     assert.equal((await invoke('variations.run')).adopted,true);
     const longJobs=(await jobs()).slice(count);assert(longJobs.length>0);
+    assert.equal(longJobs[0].prompt['461'].inputs.filename_prefix,displayedExample);
     assert(longJobs.every(job=>job.prompt['461'].inputs.filename_prefix==='recipe_00001__'+'x'.repeat(19)+'~'+'x'.repeat(20)+'_'+job.prompt['9'].inputs.denoise));
     await close();await open();
     await type('.vz-prefix','p'.repeat(210));await type('.vz-suffix','');
     count=(await jobs()).length;await invoke('variations.run');assert.equal((await jobs()).length,count);
     // The separate automatic denoise suffix contributes five bytes to the 210 manual bytes.
-    assert(await cdp.evaluate("document.querySelector('.vz-error').textContent.includes('Prefix and suffix are 215 bytes; the limit is 200 bytes')"));
+    assert(await cdp.evaluate("(()=>{const text=document.querySelector('.vz-messages').textContent;return text.includes('215')&&text.includes('200')&&text.includes('bytes')})()"),await cdp.evaluate("document.querySelector('.vz-messages').textContent"));
     await cdp.clickAt('.vz-close');await cdp.poll("!!document.querySelector('.vz-discard')");await cdp.clickAt('.vz-discard-confirm');await cdp.poll("!document.querySelector('.vz-panel')");
     check('recipe preflight: enabled-empty, unknown naming and literal affix overflow reject with zero jobs; a 200-character image filename queues with a bounded token',true);
 

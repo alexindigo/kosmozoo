@@ -5,7 +5,7 @@ const { freshRecipe } = require('./recipe-helpers.cjs');
 const { addParameter, removeRecordedImage } = require('./variation-add-helpers.cjs');
 
 module.exports = async ({ cdp, check, FAKE, KZ }) => {
-  const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
+  const invoke = require('./variation-add-helpers.cjs').variationInvoker(cdp,KZ);
   const order = () => cdp.evaluate("[...document.querySelectorAll('.vz-image-tile')].map(el=>el.dataset.imageName)");
   const jobs = async () => (await fetch(FAKE + '/__test/enqueues')).json();
   await fetch(FAKE + '/__test/activity', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ captureEnqueue: true }) });
@@ -45,7 +45,7 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     await cdp.poll("document.querySelectorAll('.vz-image-tile').length===9&&!document.querySelector('.vz-image-check')");
     await waitForSelectedPreviews(cdp);
     const geometry = await cdp.evaluate(`(()=>{
-      const tiles=[...document.querySelectorAll('.vz-image-tile,.vz-image-plus')],sizes=tiles.map(el=>{const r=el.getBoundingClientRect();return[r.width,r.height]}),
+      const tiles=[...document.querySelectorAll('.vz-image-tile')],sizes=tiles.map(el=>{const r=el.getBoundingClientRect();return[r.width,r.height]}),
         current=document.querySelector('[data-image-name="canny.png"] .vz-image-same'),token=document.createElement('span');token.style.color='var(--attention)';document.body.append(token);
       const result={sizes,names:document.querySelector('.vz-image-grid').innerText,ring:getComputedStyle(current).boxShadow,orange:getComputedStyle(token).color,
         fit:[...document.querySelectorAll('.vz-image-tile img')].every(img=>getComputedStyle(img).objectFit==='contain'),
@@ -53,12 +53,11 @@ module.exports = async ({ cdp, check, FAKE, KZ }) => {
     })()`);
     assert(geometry.sizes.every(([w,h])=>Math.abs(w-geometry.sizes[0][0])<.5&&Math.abs(h-geometry.sizes[0][1])<.5));
     assert(geometry.sizes.every(([w,h])=>Math.abs(w-h)<.5), JSON.stringify(geometry));
-    assert.equal(geometry.names.trim(), '+'); assert(geometry.ring.includes(geometry.orange)&&geometry.ring.includes('2px'));
+    assert.equal(geometry.names.trim(), ''); assert(geometry.ring.includes(geometry.orange)&&geometry.ring.includes('2px'));
     assert(geometry.fit&&geometry.ratios.length>=3, JSON.stringify(geometry));
-    check('image grid: nine mixed-ratio images and add tile share square size; contain, orange inset ring and tooltip-only names', true);
+    check('image grid: nine mixed-ratio images share square size; contain, orange inset ring and tooltip-only names', true);
     await openImageAdd(cdp);
     assert(await cdp.evaluate("document.querySelector('.vz-image-add').getBoundingClientRect().height>0&&document.querySelector('.vz-input-trigger').textContent.includes('ComfyUI images')&&document.querySelector('.vz-folder-trigger').textContent==='Add folder…'"));
-    await cdp.clickAt('.vz-image-plus');
     const before = await order(), box = index => cdp.evaluate(`(()=>{const r=document.querySelectorAll('.vz-image-tile')[${index}].getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
     const a = await box(2), b = await box(0);
     await cdp.mouse('mousePressed',a.x,a.y,{buttons:1});await cdp.mouse('mouseMoved',b.x,b.y,{buttons:1});

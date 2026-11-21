@@ -30,6 +30,7 @@ import { makeSourceBrowse } from "./source-browse.js";
 import { makeSourceSelection } from "./source-selection.js";
 import { makeSourceFreshness } from "./source-freshness.js";
 import { makeRuntimeIdentity } from "./runtime-identity.js";
+import { makeDownVotedDeletion } from "./down-voted-delete.js";
 import { makeSourceRegistry, sameSourceIdentity } from "./source-registry.js";
 import { makeRailArrivals } from "./rail-arrivals.js";
 import { fieldList, nodeImages } from "./fields.js";
@@ -83,7 +84,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     judgmentPrefs: { downvoteHides: true, revealThumbedDown: false, hideUp: false },
     filePrefs: { sourcePrefix: true },
     images: [],           // [{ id, host, filename, size, meta, judgment }]
-    inventory: { revision: null, coverage: null, folders: [""], loading: false,
+    inventory: { revision: null, coverage: null, folders: [""], skipped: undefined, loading: false,
       subfolders: { supported: null, reason: "Output inventory has not loaded" } },
     anchors: [],          // [{ name, src(dataURL), meta? }] — local drops, persisted
     views: {},            // per-resource version2 image-space crops (legacy read below)
@@ -116,6 +117,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   });
 
   const sourceRecords = makeSourceRegistry({
+    judgmentPrefs: () => st.judgmentPrefs,
     createRecord: (id, source) => ({ id, address: source.address, incarnation: source.incarnation,
       epoch: source.sourceVersion?.epoch, writes: 0, revision: 0,
       confirmed: { pinned: !!source.pinned, autoRefresh: !!source.autoRefresh, sourceVersion: source.sourceVersion },
@@ -810,6 +812,13 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     entryFor: (id) => st.images[imageIdx(id)],
     write: (collection, filename, patch) => api.setJudgment(collection, filename, patch),
     onError: (message) => actions.status.error(message),
+    onDownVote(event) {
+      if (disposed) { event.dispose(); return; }
+      const subject = event.entries.length === 1 ? event.entries[0].filename : `${event.entries.length} images`;
+      actions.status.action(`Down-voted ${subject}${st.judgmentPrefs.downvoteHides ? " (hidden)" : ""}`, {
+        label: "Undo", ariaLabel: "Undo down-vote", invoke: event.undo, dispose: event.dispose,
+      }, 5000);
+    },
     apply(id, patch) {
       const idx = imageIdx(id);
       if (idx < 0 || !Object.keys(patch).length) return;
@@ -825,6 +834,10 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   });
 
   function inventoryReply(reply, kind) {
+    const skipped = reply?.skipped;
+    if (skipped !== undefined && (!skipped || !Number.isSafeInteger(skipped.count) || skipped.count < 0 ||
+        !Array.isArray(skipped.reasons) || skipped.reasons.some(item => !item || typeof item.reason !== "string" || !item.reason || !Number.isSafeInteger(item.count) || item.count <= 0) ||
+        skipped.reasons.reduce((sum, item) => sum + item.count, 0) !== skipped.count)) throw new Error("Invalid skipped inventory records");
     if (!reply || !Array.isArray(reply.entries) || !Array.isArray(reply.folders) ||
         !reply.folders.includes("") || reply.folders.some((folder) => !isFolderPath(folder)) ||
         reply.entries.some((entry) => !entry || !isEntryName(kind, entry.name)) ||
@@ -882,7 +895,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       s.inventoryReady = true;
       s.pendingBrowse = false;
       setSt("inventory", { revision: inventory.revision, coverage: inventory.coverage,
-        folders: inventory.folders, subfolders: inventory.subfolders, loading: false });
+        folders: inventory.folders, subfolders: inventory.subfolders, skipped: inventory.skipped, loading: false });
       const c = current();
       if (!c || c.remote === name) idx = applyBrowseTarget(wasReady ? { ...browseTarget, ...liveBrowseTarget() } : browseTarget);
       if (wasReady) setFeedMergeNonce((n) => n + 1);
@@ -974,7 +987,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     s.arrivalFloor = arrivalFloor;
     s.pendingBrowse = true;
     s.inventoryReady = false;
-    setSt("inventory", { revision: null, coverage: null, folders: [""], loading: true,
+    setSt("inventory", { revision: null, coverage: null, folders: [""], skipped: undefined, loading: true,
       subfolders: hostsView()[name]?.capabilities?.subfolders ?? { supported: null, reason: "Output inventory is loading" } });
     // a host switch must not leave the previous host's feed on screen —
     // and its per-entry error state dies with the list (id-keyed, cleared)
@@ -1118,7 +1131,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   // Port of the ConfirmDelete confirm path: delete, plan the pointer, scrub the
   // trail, patch the list, then navigate. Computed against the PRE-delete list
   // (adjacency needs the original indices), executed after it.
-  async function deleteImages(images) {
+  function closeDeletedWorkbench(images) {
     // the workbench may be sitting on one of these images — either side of
     // the pair (input:<host> sides name input-dir files of that host)
     if (st.diff.open) {
@@ -1134,19 +1147,35 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         setSt("diff", "open", false);
       }
     }
+  }
+
+  async function deleteImages(images) {
+    closeDeletedWorkbench(images);
     const addresses = images.map(img => hostsView()[img.host]?.address);
     const results = await Promise.allSettled(images.map((img) => api.deleteEntry(img.host, img.filename)));
     const okIds = new Set();
     results.forEach((r, i) => {
       if (r.status === "fulfilled") {
         okIds.add(images[i].id);
-        if (hostsView()[images[i].host]?.address === addresses[i]) sourceSelection.remove(images[i].host, addresses[i], [images[i].filename]);
-        selectionChanged();
       } else {
         console.error(`delete failed: ${images[i].filename}: ${r.reason?.message ?? r.reason}`);
       }
     });
     if (okIds.size === 0) return false; // nothing succeeded
+    applyDeletedImages(images.filter(image => okIds.has(image.id)), images.map((image, i) => [image.id, addresses[i]]));
+    return true;
+  }
+
+  function applyDeletedImages(images, addresses = images.map(image => [image.id, hostsView()[image.host]?.address])) {
+    const addressById = new Map(addresses);
+    const okIds = new Set(images.map(image => image.id));
+    closeDeletedWorkbench(images);
+    for (const image of images) {
+      const address = addressById.get(image.id);
+      if (hostsView()[image.host]?.address === address) sourceSelection.remove(image.host, address, [image.filename]);
+    }
+    selectionChanged();
+    if (!images.length) return;
     const hostName = images[0].host;
     const deletedFiles = new Set(images.filter((i) => okIds.has(i.id)).map((i) => i.filename));
     const plan = planDeleteCurrent(
@@ -1169,6 +1198,19 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     }
     return true;
   }
+
+  const downVotedDeletion = makeDownVotedDeletion({
+    capture() {
+      const id = host(), record = sourceRecords.get(id), origin = sourceOrigin(id, hostsView()[id]);
+      return record && origin ? { id, record, origin } : null;
+    },
+    isCurrent: source => !disposed && sourceRecords.get(source.id) === source.record,
+    read: confirmDelete, publish: setConfirmDelete,
+    preview: (source, options) => api.deleteDownVoted(source.id, { preview: true }, source.origin, options),
+    remove: (source, names) => api.deleteDownVoted(source.id, { names }, source.origin),
+    apply: (source, names) => applyDeletedImages(names.map(filename => ({ id: `${source.id}:${filename}`, host: source.id, filename }))),
+    status: message => actions.status.info(message), closeMenu: () => setMenuOpen(false),
+  });
 
   const imageIdx = (id) => imageIdxById().get(id) ?? -1;
 
@@ -1360,6 +1402,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
 
   // --- status-stack helpers ------------------------------------------------------
   const chipTimers = { transient: 0 };
+  const chipActions = new Map();
   let errSeq = 0;
 
   // --- keymap ------------------------------------------------------------------------
@@ -1660,9 +1703,13 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   function dispose() {
     if (disposed) return;
     disposed = true;
+    for (const slot of Object.keys(chipTimers)) clearTimeout(chipTimers[slot]);
+    for (const action of chipActions.values()) action.dispose?.();
+    chipActions.clear();
     exposure.dispose(); faviconGeneration++; faviconOwner?.dispose(); faviconOwner=null;
     resolveMembership();
     runtimeIdentity.dispose();
+    downVotedDeletion.dispose();
     sourceDiscovery.dispose();
     for (const disposeFeature of featureDisposals) disposeFeature();
     featureDisposals.clear();
@@ -1732,6 +1779,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
       register(f) {
         if (registeredFeatures.some((x) => x.name === f.name)) return;
         const installed = f.install?.({ state: stateObj, handles, setSt, reconcile, surfaceDisplay,
+          reportError: message => { if (!disposed) return actions.status.error(message); },
           comparison: { context: comparisonContext, accepted: () => displayReader()?.() ?? {} } });
         if (installed) {
           spaces.register(installed.workspaceSpaces ?? []); setSpacesRevision(n => n + 1);
@@ -2012,6 +2060,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
 
     judgments: {
       dispatch: judgments.dispatch,
+      dispatchMany: judgments.dispatchMany,
       setVote(id, vote) { return actions.judgments.dispatch(id, { type: "set", patch: { vote } }); },
       toggleFavorite(id) { return actions.judgments.dispatch(id, { type: "toggle", field: "favorite" }); },
       toggleBookmark(id) { return actions.judgments.dispatch(id, { type: "toggle", field: "bookmark" }); },
@@ -2191,9 +2240,11 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     },
 
     confirm: {
-      open(req) { setConfirmDelete(req); },
-      close() { setConfirmDelete(null); },
+      open(req) { if (confirmDelete()?.kind === "down-voted" && !downVotedDeletion.cancel()) return false; setConfirmDelete(req); },
+      close() { if (confirmDelete()?.kind === "down-voted") return downVotedDeletion.cancel(); setConfirmDelete(null); },
     },
+
+    downVotedDeletion,
 
     media: { register: player => players.register(player), toggle: () => players.toggle(), report: error => players.report(error) },
     diff: {
@@ -2482,6 +2533,24 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         clearTimeout(chipTimers.transient);
         chipTimers.transient = setTimeout(() => actions.status.dismiss("transient"), 6000);
       },
+      action(msg, action, duration) {
+        const slot = `action-${++errSeq}`;
+        chipActions.set(slot, action);
+        setSt("chips", chips => [...chips, { slot, kind: "info", msg,
+          action: { label: action.label, ariaLabel: action.ariaLabel } }]);
+        chipTimers[slot] = setTimeout(() => actions.status.dismiss(slot), duration);
+        return slot;
+      },
+      run(slot) {
+        const action = chipActions.get(slot);
+        if (!action) return;
+        // Consume before invoking: a double activation cannot repeat the effect.
+        chipActions.delete(slot);
+        const result = action.invoke();
+        actions.status.dismiss(slot);
+        action.dispose?.();
+        return result;
+      },
       active(slot, msg) {
         setSt("chips", (chips) => {
           const rest = chips.filter((c) => c.slot !== slot);
@@ -2494,12 +2563,14 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         return slot;
       },
       clear(slot) {
-        setSt("chips", (chips) => chips.filter((c) => c.slot !== slot));
-        if (slot === "transient") clearTimeout(chipTimers.transient);
+        actions.status.dismiss(slot);
       },
       dismiss(slot) {
         setSt("chips", (chips) => chips.filter((c) => c.slot !== slot));
-        if (slot === "transient") clearTimeout(chipTimers.transient);
+        clearTimeout(chipTimers[slot]);
+        delete chipTimers[slot];
+        chipActions.get(slot)?.dispose?.();
+        chipActions.delete(slot);
       },
     },
 

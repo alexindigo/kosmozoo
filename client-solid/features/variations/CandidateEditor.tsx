@@ -7,6 +7,7 @@ import { SingleLineText } from "../../components/SingleLineText.js";
 import { focusMemory } from "./draft.js";
 import { IconButton } from "../../components/IconButton.js";
 import { iconSvg } from "/js/icons.mjs";
+import { ProblemFeedback } from "./ProblemFeedback.js";
 
 // Raw candidate text, typed choices, ordering and graph facts are injected by the
 // private editor. This component presents them and forwards semantic intents.
@@ -67,6 +68,7 @@ export function CandidateEditor(props) {
       </Show>
       <Show when={row().candidateKind === "connection" && row().candidateViews.some(candidate => props.nodes.find(node => node.id === candidate.node)?.outputs === null)}><p class="vz-field-help">Enter the output slot for nodes with unknown ports.</p></Show>
       <span class="vz-contract-context" hidden>{row().contract?.knowledge !== "known" ? "Input declaration unavailable; custom validation is backend-owned." : "Custom validation is backend-owned."}</span>
+      <ProblemFeedback problems={row().connectionProblem ? [row().connectionProblem] : []} />
     </div>
   </ParameterRow>;
 }

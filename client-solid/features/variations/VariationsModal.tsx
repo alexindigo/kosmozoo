@@ -37,6 +37,11 @@ import { HistoryDropdown } from "./HistoryDropdown.js";
 import { historyCount, historyDate } from "./HistoryEntry.js";
 import { BatchTargets } from "./BatchTargets.js";
 import { RunOn } from "./RunOn.js";
+import { RunStatus } from "./RunStatus.js";
+import { variationProblem, problemText } from "/shared/features/variations/problems.mjs";
+import { ProblemFeedback } from "./ProblemFeedback.js";
+import { makeImagePeek } from "./image-peek.js";
+import { ImagePeek } from "./ImagePeek.js";
 
 export function VariationsModal() {
   const store = useAppStore();
@@ -87,31 +92,39 @@ function ModalBody(props) {
     close: () => store.handles.invoke("variations.close", { automatic: true, session: props.session }) });
   onMount(() => { editor.loadGenerationTimes(); });
   const original = props.historyRef ? services.history.retained(props.historyRef.id, props.historyRef.leaseId) : null;
-  if (original) editor.restoreHistory(original);
+   if (original) {
+     try { editor.restoreHistory(original); }
+     catch (error) { editor.reportProblem("restore", variationProblem("restore-failed", { phase: "recall", runId: original.id, detail: error.message })); }
+   }
   const [historyCaption, setHistoryCaption] = createSignal(original ? `${historyCount(original)} | ${historyDate(original.createdAt)} | ${image.filename}` : "");
   const [recallWarnings, setRecallWarnings] = createSignal([]);
   const [recallStatus, setRecallStatus] = createSignal(null);
-  const [recallNotice, setRecallNotice] = createSignal("");
+  const [recallNotice, setRecallNotice] = createSignal(null);
   let alive = true, recalling = null;
   onCleanup(() => { alive = false; });
   const read = getter => { version(); return getter(); };
   // Pexels browsing is readonly presentation data for this mount; chosen
   // photos enter the image set through the editor's own File lane.
   const [browseVersion, setBrowseVersion] = createSignal(0);
-  const pexelsBrowse = makePexelsBrowse({ api: services.pexelsApi, changed: () => setBrowseVersion(value => value + 1) });
+  const pexelsBrowse = makePexelsBrowse({ api: services.pexelsApi, changed: () => setBrowseVersion(value => value + 1),
+    name: id => services.pexelsServices().services.find(service => service.id === id)?.name ?? id });
   onCleanup(() => pexelsBrowse.dispose());
   services.loadPexelsServices(true);
   const pexelsSources = createMemo(() => services.pexelsServices().services.map(service => ({ source: service.id, label: service.name, url: service.url })));
   const pexelsUrls = new Map();
   createEffect(() => {
-    for (const { source, url } of pexelsSources()) {
-      if (pexelsUrls.has(source) && pexelsUrls.get(source) !== url) { pexelsBrowse.forget(source); editor.retirePexelsService(source); }
-      pexelsUrls.set(source, url);
+    const active = new Set(pexelsSources().map(service => service.source));
+    for (const [source, { label }] of pexelsUrls) if (!active.has(source)) { pexelsBrowse.forget(source); editor.retirePexelsService(source, label); pexelsUrls.delete(source); }
+    for (const { source, url, label } of pexelsSources()) {
+      if (pexelsUrls.has(source) && pexelsUrls.get(source).url !== url) { pexelsBrowse.forget(source); editor.retirePexelsService(source, label); }
+      pexelsUrls.set(source, { url, label });
     }
   });
   const browse = getter => { browseVersion(); return getter(); };
   const pexelsPort = id => ({
     sources: pexelsSources,
+    status: services.pexelsServices,
+    retryServices: () => services.loadPexelsServices(true),
     results: (service, query) => browse(() => pexelsBrowse.results(service.source, query)),
     request: (service, query) => pexelsBrowse.request(service.source, query),
     more: (service, query) => pexelsBrowse.more(service.source, query),
@@ -119,7 +132,8 @@ function ModalBody(props) {
     state: (service, photo) => read(() => editor.pexelsState(id, service.source, photo)),
     label: (service, photo) => browse(() => pexelsLabel(pexelsBrowse.photo(service.source, photo), photo)),
     thumbnail: (service, photo) => services.pexelsApi.pexelsThumbnail(service.source, photo, service.url),
-    toggle: (service, photo) => editor.togglePexels(id, service.source, photo, service.url),
+    image: (service, photo) => services.pexelsApi.pexelsImage(service.source, photo, service.url),
+    toggle: (service, photo) => editor.togglePexels(id, service.source, photo, service.url, service.label),
   });
   const targets = () => read(editor.targets);
   const destination = () => read(editor.destination);
@@ -198,6 +212,7 @@ function ModalBody(props) {
   const rememberFocus = (restore) => { restoreFocus = restore; };
   const focus = focusMemory(rememberFocus);
   const guard = makeLeaveGuard({ dirty: intent => intent?.type === "apply-history" ? intent.overlap : editor.dirty(),
+    failure: problem => problem ? editor.reportProblem("transition", problem) : editor.clearProblem("transition"),
     suspend: () => { for (const child of children) child.suspend(); },
     restore: () => { for (const child of children) child.resume(); restoreFocus(); },
     decision: value => { setDecision(value); editor.decision(value); }, invalidate: editor.invalidateClose });
@@ -206,22 +221,25 @@ function ModalBody(props) {
   const settleRecall = promise => {
     if (recalling?.promise !== promise) return;
     recalling = null;
-    if (alive) setRecallNotice("");
+    if (recallNotice()?.owner === promise) setRecallNotice(null);
   };
   const recall = id => {
     if (!alive) return Promise.resolve({ status: "stale" });
     if (recalling) {
       if (recalling.id === id) return recalling.promise;
-      setRecallNotice("Another recall is in progress. This selection was not applied.");
+      setRecallNotice({ owner: recalling.promise, text: problemText(variationProblem("recall-busy", { phase: "recall", current: recalling.id, runId: id })) });
       return Promise.resolve({ status: "busy" });
     }
-    setRecallNotice("");
+    setRecallNotice(null);
     const revision = editor.revision();
     const promise = (async () => {
       const saved = await services.history.open(id);
       let transferred = false;
       try {
-        if (!alive || guard.pending() || editor.revision() !== revision) return { status: "stale" };
+         if (!alive || guard.pending() || editor.revision() !== revision) {
+           if (alive) setRecallNotice({ text: problemText(variationProblem("recall-changed", { phase: "recall", runId: id })) });
+           return { status: "stale" };
+         }
         const plan = await editor.planRecall(saved);
         // Even a clean guard invalidates accepted close eligibility. An empty
         // overlay is a terminal selection, not an editor transition.
@@ -231,9 +249,11 @@ function ModalBody(props) {
           transferred = true; setHistoryCaption(`${historyCount(saved)} | ${historyDate(saved.createdAt)}`);
         }
         if (result.status === "applied" || result.status === "unchanged") {
-          setRecallWarnings(plan.warnings); setRecallStatus(result.status);
+          setRecallWarnings(plan.warnings);
+          setRecallStatus(plan.warnings.length || result.status === "unchanged" ? problemText(variationProblem("recall-summary", { phase: "recall", runId: id, numbers: plan.counts })) : null);
         }
-        return result;
+         if (result.status === "stale") setRecallNotice({ text: problemText(variationProblem("recall-changed", { phase: "recall", runId: id })) });
+         return result;
       } finally {
         // The transition has settled. Lease cleanup remains owned by the
         // history client (failures stay retained for retry); it must neither
@@ -277,27 +297,32 @@ function ModalBody(props) {
   // Per-source input readiness settles separately from editable recipe work.
   // Each Run destination needs its own catalogue: the workflow as that ComfyUI
   // declares it, with conflicts. Only the latest destination request installs.
-  const [folderCapability] = createResource(() => services.folderCapability());
+   const [folderCapability, { refetch: retryFolderCapability }] = createResource(() => services.folderCapability());
   let catalogueGeneration = 0;
   const loadCatalogue = () => {
     const ticket = ++catalogueGeneration, chosen = editor.destination();
     if (original && !chosen) return;
     const request = original ? services.historyCatalogue(original.id, original.leaseId, 0, chosen) : services.probe(image, chosen);
-    request.then(data => { if (alive && ticket === catalogueGeneration) editor.installCatalogue(data, !!original); },
-      error => { if (alive && ticket === catalogueGeneration) editor.catalogueFailure(error); });
+     Promise.resolve(request).then(data => { if (alive && ticket === catalogueGeneration) editor.installCatalogue(data, !!original); })
+       .catch(error => { if (alive && ticket === catalogueGeneration) editor.catalogueFailure(error); });
   };
   onMount(loadCatalogue);
   const chooseDestination = host => { if (editor.setDestination(hostOrigin(host))) loadCatalogue(); };
   const retryCatalogue = () => { if (editor.retryCatalogue()) loadCatalogue(); };
   const resolveConflict = (id, value) => editor.resolveConflict(id, value);
 
-  const inputSources = createMemo(() => [image.origin, ...services.inputSources().filter(origin => origin.source !== image.host)].filter(Boolean));
+   const inputSources = createMemo(() => services.inputSources().sort((a, b) => Number(b.source === image.host) - Number(a.source === image.host)));
+   const destinationProblem = createMemo(() => !services.runDestinations().some(origin => origin.source === destination()?.source)
+     ? variationProblem("no-destination", { phase: "destination" }) : null);
   const targetThumbnail = () => original ? services.historyThumbnail({ runId: original.id, resourceId: "target-0", leaseId: original.leaseId }) : services.inputThumbnail(image.host, image.filename, image.origin, "output");
   const batchThumbnail = target => original ? services.historyThumbnail({ runId: original.id,
     resourceId: `target-${props.images.findIndex(image => image.id === target.id)}`, leaseId: original.leaseId })
     : services.inputThumbnail(target.host, target.filename, target.origin, "output");
   const currentThumbnail = row => original ? services.historyThumbnail({ runId: original.id, resourceId: original.targets[0].graphResources[row.id], leaseId: original.leaseId }) : services.inputThumbnail(image.host, row.current, image.origin, row.currentRoot);
-  const unavailable = () => targets().find(target => target.unavailable)?.unavailable ?? (original ? read(() => editor.sourceProblem()) : null);
+  const unavailable = () => {
+    const missing = targets().filter(target => target.unavailable);
+    return missing.length ? problemText(variationProblem("saved-unavailable", { phase: "history", numbers: { unavailable: missing.length, total: targets().length }, names: missing.map(target => `${target.filename}: ${target.unavailable}`) })) : original ? read(() => editor.sourceProblem()) : null;
+  };
   let initializedImages = false;
   createEffect(() => {
     if (!read(editor.ready) || !strParams().length) return;
@@ -327,6 +352,15 @@ function ModalBody(props) {
     const unlayer = store.actions.keys.pushLayer({ id: "variations-images", command: "variations.images.close", phase: "capture" });
     return () => { unlayer(); disown(); };
   };
+  // One Space peek owner for the picker and the chosen set; the dispatcher's
+  // capture layer admits the keydown and the owner observes its own release.
+  const [peekVersion, setPeekVersion] = createSignal(0);
+  const peek = makeImagePeek({ changed: () => setPeekVersion(value => value + 1) });
+  onCleanup(() => peek.dispose());
+  onCleanup(store.handles.own("variations.peek.start", () => peek.start()));
+  onCleanup(store.actions.keys.pushLayer({ id: "variations-peek", command: "variations.peek.start", phase: "capture",
+    keys: { " ": {} }, decline: event => !peek.admits(event) }));
+  const peekTarget = descriptor => { const target = peek.target(descriptor); onCleanup(target.retire); return target.props; };
   const registerTabKeys = (capability, group = "source") => {
     const command = group === "feed" ? "variations.feed-tabs.move" : "variations.tabs.move";
     const disown = store.handles.own(command, capability.move);
@@ -382,8 +416,9 @@ function ModalBody(props) {
           <SingleLineText class="vz-title" value="Generate image variations" />
           <HistoryDropdown history={services.history} state={services.historyState} thumbnail={services.historyThumbnail} registerThumbnail={services.registerThumbnail}
             registerPopup={registerImagePopup} registerEditor={registerEditor} rememberFocus={rememberFocus} bulk={batch}
-            caption={historyCaption()} warnings={recallWarnings()} recallStatus={recallStatus()} notice={recallNotice()} onRecall={recall} />
-          <RunOn destinations={services.runDestinations()} value={destination()?.source ?? ""} offline={host => !store.state.hosts[host]?.online}
+            caption={historyCaption()} warnings={recallWarnings()} recallStatus={recallStatus()} notice={recallNotice()?.text ?? ""} onRecall={recall} />
+           <RunOn destinations={services.runDestinations()} value={destination()?.source ?? ""} offline={host => !store.state.hosts[host]?.online}
+             problem={destinationProblem()}
             fixed={running()} onChoose={chooseDestination} focus={focus} />
           <IconButton chrome size="md" variant="plain vz-close" title="Close"
             onAction={() => store.handles.invoke("variations.close", { session: props.session })}
@@ -415,21 +450,22 @@ function ModalBody(props) {
                   return (
                     <Show when={r()?.enabled}>
                       <ImageSetPanel id={id} row={r} onEnable={checked => onImgToggle(id, checked)} registerFocus={panelFocusPort(id)}
-                        onInsert={onInsertPlaceholder}
+                         onInsert={onInsertPlaceholder}
+                         onFiles={(resources, index) => editor.dropImages(id, resources, name => UPLOAD_IMG_EXT.test(name), index)}
                         onAdd={(items, index) => editor.addImages(id, items, index)} onRemove={item => editor.removeImage(id, item)}
-                        onMove={(item, index) => editor.moveImage(id, item, index)}
+                        onMove={(item, index) => editor.moveImage(id, item, index)} onRotate={(item, direction) => editor.rotateImage(id, item, direction)}
                         onToggleTarget={() => editor.toggleTargetImage(id)}
                         targetThumbnail={targetThumbnail} archiveThumbnail={services.historyThumbnail}
                         thumbnail={(name, root = "input") => services.inputThumbnail(image.host, name, image.origin, root)}
-                        sources={inputSources()} sourceInputs={(origin, root) => read(() => editor.sourceInputs(origin, root))}
+                        sources={inputSources()} sourceInputs={(origin, root, _query, filters) => read(() => editor.sourceInputs(origin, root, filters))}
                         onSource={(origin, root) => editor.loadSourceInputs(origin, false, root)} onRetrySource={(origin, root) => editor.loadSourceInputs(origin, true, root)}
                         inputState={(origin, name, root) => read(() => editor.sourceInputState(id, origin, name, root))}
                         onToggleInput={(origin, name, root) => editor.toggleSourceInput(id, origin, name, root)}
                         inputThumbnail={(origin, name, root) => services.inputThumbnail(origin.source, name, origin, root)} registerTabKeys={registerTabKeys}
                         registerThumbnail={services.registerThumbnail}
                         pathThumbnail={services.pathThumbnail} onAddFolder={path => editor.addFolder(id, path)}
-                        folderCapability={() => folderCapability.error ? null : folderCapability()} onChooseFolder={services.chooseFolder}
-                        pexels={pexelsPort(id)}
+                         folderCapability={() => folderCapability.error ? null : folderCapability()} folderError={() => folderCapability.error} onRetryFolder={retryFolderCapability} onChooseFolder={services.chooseFolder}
+                        pexels={pexelsPort(id)} peekTarget={peekTarget}
                         registerPopup={registerImagePopup} registerEditor={registerEditor} rememberFocus={rememberFocus} />
                     </Show>
                   );
@@ -442,7 +478,7 @@ function ModalBody(props) {
               >
                 <Show
                   when={orderedItems().length > 0}
-                  fallback={<Show when={!fieldFilter().trim()}><SingleLineText class="vz-loading" value="this graph exposes no varyable parameters" /></Show>}
+                  fallback={<Show when={!fieldFilter().trim()}><SingleLineText class="vz-loading" value={problemText(variationProblem("catalogue-empty", { phase: "catalogue", target: { name: targets()[0]?.filename } }))} /></Show>}
                 >
                   <For each={orderedItems()}>
                     {(itemId) => {
@@ -523,13 +559,13 @@ function ModalBody(props) {
           <div class="vz-right">
             <div class="vz-sidebar-body">
             <div class="vz-count-group">
-              <SingleLineText class="vz-rlabel" value={tally().exact ? "Variations" : tally().status === "invalid" ? "Check the recipe" : "Estimated variations"} />
+              <SingleLineText class="vz-rlabel" value={tally().overLimit ? "Variations (over limit)" : tally().exact ? "Variations" : tally().status === "invalid" ? "Check the recipe" : "Estimated variations"} />
               <span class="vz-rlabel vz-time-label">Estimated time:</span>
-              <SingleLineText class={"vz-count" + (tally().n >= 1e15 ? " vz-count-large" : "") + (tally().n > 1000 ? " vz-count-hot" : tally().n > 100 ? " vz-count-warn" : "")}
-                value={tally().status === "invalid" ? "—" : tally().display} hint={tally().fullCount} />
+              <SingleLineText class={"vz-count" + (tally().n >= 1e15 ? " vz-count-large" : "") + (tally().overLimit ? " vz-count-over-limit vz-count-hot" : tally().n > 1000 ? " vz-count-hot" : tally().n > 100 ? " vz-count-warn" : "")}
+                 value={tally().status === "invalid" ? "--" : tally().display} hint={tally().fullCount} aria-busy={tally().busy ? "true" : "false"} />
               <SingleLineText class="vz-time-value" value={tally().timeEstimate.display}
                 hint="Based on original image generation times and the displayed job-count estimate. Edited settings can change speed; existing queues are not included. Independent backends may run concurrently." />
-              <p class="vz-count-sub">{tally().breakdown}</p>
+               <p class="vz-count-sub" title={tally().countChain || tally().breakdown}>{tally().countChain || tally().breakdown}</p>
             </div>
             <div class="vz-naming-group">
               <span class="vz-rlabel">Output names</span>
@@ -549,38 +585,35 @@ function ModalBody(props) {
                 {...focus} onFocus={(e) => { setFocused("suffix"); focus.onFocus(e); }}
                 onInput={(e) => editor.edit("naming", "root", "suffix", e.currentTarget.value)}
               />
-              <Show when={tally().naming.example}>
-                <div class="vz-output-preview">
-                  <span>Example</span>
-                  <SingleLineText class="vz-output-example" value={tally().naming.example} hint={tally().naming.help} />
-                </div>
-              </Show>
+               <div class="vz-output-preview" classList={{ "vz-output-empty": !tally().naming.example }}>
+                <span>Example</span>
+                <SingleLineText class="vz-output-example" value={tally().naming.example ?? ""} hint={tally().naming.help} />
+               </div>
+               <div class="vz-naming-feedback" role="status" title={[...(tally().naming.notices ?? []), ...(tally().naming.problems ?? [])].map(problemText).join("\n")}>
+                 <ProblemFeedback problems={[...(tally().naming.notices ?? []), ...(tally().naming.problems ?? [])]} />
+               </div>
             </div>
             </div>
-            <div class="vz-messages" role="status">
-              <div class="vz-message-content">
-                <Show when={tally().message && !result()}><p class={["invalid", "conflict", "failed"].includes(tally().status) ? "vz-readiness-error" : "vz-field-help"}>{tally().message}</p></Show>
-                <Show when={tally().uncheckedMessage && !result()}><p class="vz-field-help">{tally().uncheckedMessage}</p></Show>
-                <Show when={tally().status === "failed"}><button type="button" class="vz-thumbnail-retry vz-catalogue-retry" onClick={retryCatalogue}>Retry</button></Show>
-                <Show when={result()}>{value => <>
-                  <Show when={Number.isSafeInteger(value().submitted) && value().total > 0}>
-                    <p class={value().ok ? "vz-queued vz-ok" : "vz-queued"}>Queued {value().submitted} of {value().total} jobs</p>
-                  </Show>
-                </>}</Show>
-                <p class={"vz-error" + (result()?.ok ? " vz-neutral" : "")}>{result()?.reason ?? result()?.text ?? ""}</p>
-              </div>
-            </div>
+             <RunStatus preview={tally()} result={result()} unavailable={unavailable()} onRetry={retryCatalogue}
+               problems={[...(read(editor.problems)), ...(tally().notices ?? []), ...(tally().naming?.notices ?? []), ...(destinationProblem() ? [destinationProblem()] : [])]} />
             <div class="vz-run-slot">
-              <Show when={!unavailable()} fallback={<p class="vz-readiness-error" role="status">{unavailable()}</p>}><Show when={!running()} fallback={<SingleLineText class="vz-field-help" role="status" value="Queuing…" />}>
-                <button class="vz-run" onClick={() => store.handles.invoke("variations.run")}><SingleLineText value="Run" /></button>
+              <Show when={!unavailable()}><Show when={!running()} fallback={
+                <div class="vz-submitting" role="status" aria-live="polite">
+                  <span class="vz-submit-spinner" aria-hidden="true" />
+                  <SingleLineText value={`Submitting ${read(editor.submission)?.sent ?? "--"} / ${read(editor.submission)?.total ?? "--"}`} />
+                </div>
+              }>
+                 <button class="vz-run" disabled={!!destinationProblem() || !read(editor.canRun)} onClick={() => store.handles.invoke("variations.run")}><SingleLineText value="Run" /></button>
               </Show></Show>
             </div>
           </div>
         </div></div>
         <BatchTargets targets={targets()} thumbnail={batchThumbnail} registerThumbnail={services.registerThumbnail}
+          showProblem={batch} problem={id => read(() => editor.targetProblem(id))} outcome={id => read(() => editor.targetOutcome(id))}
           generationTime={id => read(() => editor.generationTime(id))} removable={!running()}
           rememberFocus={rememberFocus} onRemove={id => editor.removeTarget(id)} />
       </div>
+      <ImagePeek state={() => { peekVersion(); return peek.state(); }} register={services.registerThumbnail} />
       <Show when={decision()}>
         <VariationDiscardConfirmation owner={props.session} running={running()} applying={decision().type === "apply-history"} onCancel={guard.cancel} onDiscard={guard.discard} />
       </Show>

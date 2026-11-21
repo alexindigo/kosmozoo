@@ -157,8 +157,22 @@ class CDP {
 
   async goto(url) {
     await this.send("Page.enable");
-    await this.send("Page.navigate", { url });
-    await this.poll("document.readyState !== 'loading'", 20000);
+    const navigation = await this.send("Page.navigate", { url });
+    if (navigation.errorText) throw new Error(`navigation failed: ${navigation.errorText}`);
+    // A previous document can already be complete while the requested loader
+    // has not committed. Same-document navigation intentionally has no loaderId.
+    const deadline = Date.now() + 20000;
+    for (;;) {
+      const frame = navigation.loaderId ? (await this.send("Page.getFrameTree")).frameTree.frame : null;
+      if (!frame || frame.id === navigation.frameId && frame.loaderId === navigation.loaderId) {
+        try { if (await this.evaluate("document.readyState !== 'loading'")) return; }
+        catch (error) {
+          if (!/Execution context was destroyed|Cannot find context/.test(error.message)) throw error;
+        }
+      }
+      if (Date.now() >= deadline) throw new Error(`navigation did not become ready: ${url}`);
+      await sleep(50);
+    }
   }
 
   // Bounded polling — a condition that can't become true fails with a

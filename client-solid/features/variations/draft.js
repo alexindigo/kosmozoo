@@ -10,8 +10,13 @@ export function createRunId() {
 
 export { snapshotDraft, sameDraft } from "/shared/features/variations/recipe-model.mjs";
 
-export function makeLeaveGuard({ dirty, suspend, restore, decision, invalidate }) {
+import { problemFrom } from "/shared/features/variations/problems.mjs";
+
+export function makeLeaveGuard({ dirty, suspend, restore, decision, invalidate, failure = () => {} }) {
   let pending = null, alive = true;
+  const actions = { close: "close Variations", replace: "open the new selection", automatic: "update Variations", "apply-history": "apply the saved Run" };
+  const action = type => actions[type] ?? type;
+  const report = (error, operation) => { const problem = problemFrom(error, { code: "transition-failed", phase: "transition", operation: action(operation) }); failure(problem); return Object.assign(error, { problem }); };
   const settle = (record, status) => {
     if (pending === record) { pending = null; decision(null); }
     record.resolve(status);
@@ -26,17 +31,24 @@ export function makeLeaveGuard({ dirty, suspend, restore, decision, invalidate }
       const result = record.permit();
       // A permit may update the mounted editor rather than unmount it. The
       // surviving owner must resume every capability it suspended either way.
-      if (alive && record.suspended) restore();
+      if (alive && record.suspended) { record.suspended = false; restore(); }
       record.resolve(result);
-    } catch (error) { if (alive && record.suspended) restore(); record.reject(error); }
+    } catch (error) {
+      if (alive && record.suspended) { try { restore(); } catch (restoreError) { report(restoreError, "restore editor controls"); } }
+      record.reject(report(error, record.intent.type));
+    }
   };
   return {
     request(request) {
       if (!alive) return Promise.resolve({ status: "stale" });
       const key = JSON.stringify(request.intent);
-      if (pending) return key === pending.key ? pending.promise : Promise.resolve({ status: "busy" });
+      if (pending) {
+        if (key === pending.key) return pending.promise;
+        report(new Error(`the confirmation to ${action(pending.intent.type)} is still open`), request.intent.type);
+        return Promise.resolve({ status: "busy" });
+      }
        if (request.intent.type === "automatic" && dirty(request.intent)) return Promise.resolve({ status: "stale" });
-      invalidate();
+      invalidate(); failure(null);
       const record = { ...request, key, committing: false };
       record.promise = new Promise((resolve, reject) => { record.resolve = resolve; record.reject = reject; });
       pending = record;
@@ -49,7 +61,7 @@ export function makeLeaveGuard({ dirty, suspend, restore, decision, invalidate }
       if (!pending) return;
       const record = pending;
       try { record.cancel(); settle(record, { status: "cancelled" }); restore(); }
-      catch (error) { pending = null; decision(null); record.reject(error); }
+      catch (error) { pending = null; decision(null); record.reject(report(error, "restore editor after cancellation")); }
     },
     discard() { if (pending) commit(pending); },
     dispose() {

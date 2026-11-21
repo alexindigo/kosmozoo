@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, settledCount } = require('./variation-add-helpers.cjs');
 module.exports = async ({ cdp, check, ENGINE, FAKE, KZ }) => {
   const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, '../fixtures/dynamic-combos.json')));
   const source = 'dynamic-combos', filename = 'dynamic-combos.png';
@@ -16,6 +16,7 @@ module.exports = async ({ cdp, check, ENGINE, FAKE, KZ }) => {
   try {
     await cdp.poll(`(async()=>!!${KZ}.state.hosts['${source}'])()`);
     await cdp.evaluate(`fetch('/api/collections/${source}/entries/${filename}/bytes').then(r=>{if(!r.ok)throw Error(r.status);return r.arrayBuffer()}).then(()=>true)`);
+    await invoke('source.select', { id: source });
     await invoke('variations.open', { id: `${source}:${filename}` });
     await cdp.poll(`!!document.querySelector('[data-catalogue-id="459:500.sampling_mode"]')`);
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
@@ -27,7 +28,7 @@ module.exports = async ({ cdp, check, ENGINE, FAKE, KZ }) => {
     assert.equal(await cdp.evaluate(`!!document.querySelector('[data-text-id="459:500.sampling_mode"]')`), false);
     check('dynamic combo: Generate Text.sampling_mode renders native on/off option checkboxes, never a textarea', true);
     await cdp.clickAt(row + ' .vz-enum-opt:last-child .checkbox');
-    await cdp.poll("document.querySelector('.vz-count').textContent.trim()==='1'");
+    await settledCount(cdp, '1');
     await cdp.evaluate("document.activeElement.blur();document.querySelector('.vz-sliders').scrollTop=0;new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
     if (process.env.E2E_DYNAMIC_SHOT) {
       const shot = await cdp.send('Page.captureScreenshot', { format: 'png' });

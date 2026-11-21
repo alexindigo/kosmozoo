@@ -5,6 +5,7 @@ import { Chevron } from "../../components/Select.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
 import { HistoryList } from "./HistoryPanel.js";
 import { focusMemory } from "./draft.js";
+import { problemText } from "/shared/features/variations/problems.mjs";
 
 export function HistoryDropdown(props) {
   const [open, setOpen] = createSignal(false), [suspended, setSuspended] = createSignal(false), [placed, setPlaced] = createSignal(null);
@@ -36,12 +37,12 @@ export function HistoryDropdown(props) {
       style={{ left: `${placed()?.left ?? 0}px`, top: `${placed()?.top ?? 0}px`, width: `${placed()?.width ?? 320}px`, "max-height": `${placed()?.maxHeight ?? 320}px` }}>
       <div class="vh-menu-label">Apply saved changes to {props.bulk ? "these images" : "this image"}</div>
       <Show when={props.notice}><p class="vh-status" role="status">{props.notice}</p></Show>
-      <HistoryList compact history={props.history} state={props.state} thumbnail={props.thumbnail} registerThumbnail={props.registerThumbnail}
+      <div class="vh-menu-list"><HistoryList compact history={props.history} state={props.state} thumbnail={props.thumbnail} registerThumbnail={props.registerThumbnail}
         registerPopup={props.registerPopup} registerEditor={props.registerEditor}
-        onRecall={async id => { const result = await props.onRecall(id); if (result?.status === "applied" || result?.status === "unchanged") close(); }} />
+        onRecall={async id => { const result = await props.onRecall(id); if (result?.status === "applied" || result?.status === "unchanged") close(); }} /></div>
     </div></Show>
-    <Show when={props.warnings?.length || props.recallStatus === "unchanged"}><div class="vh-warning" role="status"><strong>{props.recallStatus === "unchanged" ? "No compatible changes were applied." : "Applied compatible changes. Other settings were kept."}</strong>
-      <For each={props.warnings}>{warning => <span>{warning.label}: {warning.reason}</span>}</For>
+    <Show when={props.recallStatus}><div class="vh-warning" role="status"><strong>{props.recallStatus}</strong>
+      <For each={props.warnings}>{warning => <span>{warning.problem ? problemText(warning.problem) : `${warning.label}: ${warning.reason}`}</span>}</For>
     </div></Show>
   </div>;
 }

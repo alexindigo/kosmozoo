@@ -4,7 +4,9 @@
 // to the browser via /shared/).
 
 import { sameContext } from "../../source-origin.mjs";
-import { isEntryPath } from "../../entry-path.mjs";
+import { isCreatedEntryPath } from "../../entry-path.mjs";
+import { variationProblem, problemError } from "./problems.mjs";
+export { MAX_JOBS_PER_IMAGE } from "./limits.mjs";
 import { parseParamId, parameterIndex, cloneJsonValue, sameJsonValue, formatJsonValue } from "../../parameters.mjs";
 export { paramId, parseParamId, parameterIndex, parameterLabel, parameterAliases, parameterCurrent } from "../../parameters.mjs";
 
@@ -24,6 +26,52 @@ export const OUTPUT_NAME_BUDGET = Math.min(200, 255 - HEADROOM);
 export const TOKEN_NAME_BUDGET = 40;
 const encoder = new TextEncoder();
 const byteLength = value => encoder.encode(value).length;
+
+// Synchronous SHA-256 keeps preview and Run on one environment-pure naming path.
+// Hash the full original UTF-8 text, not its cleaned/truncated display fragment.
+const SHA256_K = new Uint32Array([
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+]);
+const rotateRight = (value, bits) => (value >>> bits) | (value << (32 - bits));
+function textHash(value) {
+  const bytes = encoder.encode(value), padded = new Uint8Array(Math.ceil((bytes.length + 9) / 64) * 64);
+  padded.set(bytes); padded[bytes.length] = 0x80;
+  const view = new DataView(padded.buffer);
+  view.setUint32(padded.length - 8, Math.floor(bytes.length / 0x20000000));
+  view.setUint32(padded.length - 4, bytes.length * 8);
+  const state = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
+  const words = new Uint32Array(64);
+  for (let offset = 0; offset < padded.length; offset += 64) {
+    for (let i = 0; i < 16; i++) words[i] = view.getUint32(offset + i * 4);
+    for (let i = 16; i < 64; i++) {
+      const x = words[i - 15], y = words[i - 2];
+      const s0 = rotateRight(x, 7) ^ rotateRight(x, 18) ^ (x >>> 3), s1 = rotateRight(y, 17) ^ rotateRight(y, 19) ^ (y >>> 10);
+      words[i] = words[i - 16] + s0 + words[i - 7] + s1;
+    }
+    let [a, b, c, d, e, f, g, h] = state;
+    for (let i = 0; i < 64; i++) {
+      const s1 = rotateRight(e, 6) ^ rotateRight(e, 11) ^ rotateRight(e, 25), choose = (e & f) ^ (~e & g);
+      const t1 = (h + s1 + choose + SHA256_K[i] + words[i]) >>> 0;
+      const s0 = rotateRight(a, 2) ^ rotateRight(a, 13) ^ rotateRight(a, 22), majority = (a & b) ^ (a & c) ^ (b & c);
+      const t2 = (s0 + majority) >>> 0;
+      h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+    }
+    for (const [i, word] of [a, b, c, d, e, f, g, h].entries()) state[i] += word;
+  }
+  return Array.from(state, word => word.toString(16).padStart(8, "0")).join("");
+}
+
+export function textName(value) {
+  const clean = value.replace(/[^A-Za-z0-9.-]+/g, "_").replace(/^[_.]+|[_.]+$/g, "").slice(0, 10) || "text";
+  return `${clean}~${textHash(value).slice(0, 6)}`;
+}
 
 function foldName(value, budget, headBudget = Math.ceil((budget - 1) / 2)) {
   if (byteLength(value) <= budget) return value;
@@ -54,37 +102,49 @@ export function outputName({ prefix = "", sourceStem = "", suffix = "", budget =
 // Original graph facts identify the output, never a mutable filename value.
 // An explicit candidate is the complete recorded prefix, including its original
 // directory. It cannot change destinations or be silently folded/sanitized.
-export function composeOutputName(target, values = {}, prefix = "", suffix = "") {
+export function composeOutputName(target, values = {}, prefix = "", suffix = "", { preliminary = false } = {}) {
   const directory = target.directory ?? "", selected = !!target.parameterId && Object.hasOwn(values, target.parameterId);
+  const fail = (code, context) => problemError(variationProblem(code, { phase: "naming", parameter: { id: target.parameterId ?? "root", label: target.parameterId ?? "Output names" }, directory, ...context }));
+  const pathProblem = value => value.split("/").find(part => !part || part === "." || part === "..") !== undefined ? "empty, absolute or dot/parent path segment"
+    : /[\u0000-\u001f\u007f-\u009f]/.test(value) ? "line break or control character" : value.includes("\\") ? "backslash" : "not a canonical relative output path";
   let sourceStem = target.sourceStem ?? "";
   if (selected) {
     const candidate = values[target.parameterId];
-    if (typeof candidate !== "string") throw new Error(`${target.parameterId}: filename_prefix requires text`);
-    if (candidate !== "" && !isEntryPath(candidate)) throw new Error(`${target.parameterId}: invalid filename_prefix path`);
+    if (typeof candidate !== "string") throw fail("output-type", { value: candidate });
+    if (candidate !== "" && !isCreatedEntryPath(candidate)) throw fail("output-path", { value: candidate, detail: pathProblem(candidate) });
     const slash = candidate.lastIndexOf("/"), candidateDirectory = slash < 0 ? "" : candidate.slice(0, slash + 1);
-    if (candidateDirectory !== directory) throw new Error(`${target.parameterId}: filename_prefix must retain the original output directory`);
+    if (candidateDirectory !== directory) throw fail("output-directory", { actual: candidateDirectory });
     sourceStem = candidate.slice(slash + 1);
     if (byteLength(prefix) + byteLength(sourceStem) + byteLength(suffix) > OUTPUT_NAME_BUDGET) {
-      throw new Error(`${target.parameterId}: composed filename_prefix exceeds ${OUTPUT_NAME_BUDGET} bytes; the selected name was not shortened`);
+      throw fail("output-budget", { value: candidate, numbers: { bytes: byteLength(prefix) + byteLength(sourceStem) + byteLength(suffix), limit: OUTPUT_NAME_BUDGET } });
     }
   }
-  if ((target.leafOnly ?? !!directory) && /[/\\]/.test(prefix + suffix)) throw new Error("Prefix/suffix must stay within the producing directory's filename leaf");
+  if ((target.leafOnly ?? !!directory) && /[/\\]/.test(prefix + suffix)) throw fail("output-separator", { field: /[/\\]/.test(prefix) ? "Prefix" : "Suffix", value: /[/\\]/.test(prefix) ? prefix : suffix, separator: /[/\\]/.exec(prefix + suffix)[0] });
   const value = directory + outputName({ prefix, sourceStem, suffix });
-  if (selected && value !== "" && !isEntryPath(value)) throw new Error(`${target.parameterId}: invalid composed filename_prefix path`);
+  // Only preliminary candidate checks may be empty; final writers and preview
+  // always enforce the address grammar after all contributions are composed.
+  if (!(preliminary && selected && value === "") && !isCreatedEntryPath(value)) throw fail("output-path", { value, composed: true, detail: pathProblem(value) });
   return { value, selected, ...(selected ? { parameterId: target.parameterId, candidate: values[target.parameterId] } : {}) };
 }
 
 // Preview and Run use this same projection; automatic contributions are derived,
 // never assigned over manual Prefix/Suffix or over the selected parameter value.
+export const namingProblems = proofs => proofs.flatMap(([field, proof]) => (proof.unresolved ?? []).map(issue => variationProblem("naming-token", { phase: "naming", parameter: { id: "root", label: field }, field, token: issue.token, detail: issue.detail })));
 export function variationOutputName(target, request, permutation, currentValues, aliases = {}, parameters = [], { sameHost = true } = {}) {
   const automatic = request.automaticNaming === true ? automaticNaming(request.ranges ?? {}, currentValues, request.imageParams ?? {}, { sameHost }).suffix : "";
   const prefix = templateReplaceWithProof(String(request.prefix ?? ""), permutation, currentValues, aliases, parameters);
   const suffix = templateReplaceWithProof(String(request.suffix ?? "") + automatic, permutation, currentValues, aliases, parameters);
-  return { ...composeOutputName(target, permutation, prefix.text, suffix.text), prefix: prefix.text, suffix: suffix.text,
-    complete: prefix.complete && suffix.complete };
+  const problems = namingProblems([["Prefix", prefix], ["Suffix", suffix]]);
+  const composed = composeOutputName(target, permutation, prefix.text, suffix.text);
+  const before = byteLength(String(target.sourceStem ?? "")), after = byteLength(composed.value.slice((target.directory ?? "").length)) - byteLength(prefix.text) - byteLength(suffix.text);
+  const shortened = [...(prefix.shortened ?? []), ...(suffix.shortened ?? [])];
+  if (!composed.selected && before > after) shortened.push({ before, after, limit: OUTPUT_NAME_BUDGET });
+  return { ...composed, prefix: prefix.text, suffix: suffix.text, complete: prefix.complete && suffix.complete, problems,
+    notices: shortened.map(numbers => variationProblem("name-shortened", { severity: "warning", phase: "naming", numbers })) };
 }
 
-function namingToken(value, kind) {
+function tokenText(value, kind) {
+  if (typeof value === "string" && kind !== "image" && kind !== "enum") return textName(value);
   let text = formatValue(value);
   if (kind === "image") {
     // A resource path identifies graph input, never an output naming directory.
@@ -92,12 +152,13 @@ function namingToken(value, kind) {
     const dot = text.lastIndexOf(".");
     if (dot > text.lastIndexOf("/") + 1) text = text.slice(0, dot);
   }
-  return foldName(text, TOKEN_NAME_BUDGET, 19);
+  return text;
 }
+const namingToken = (value, kind) => foldName(tokenText(value, kind), TOKEN_NAME_BUDGET, 19);
 
 export function rangeValues(min, max, step) {
   const { axes: [axis] } = permutationPlan({ value: { enabled: true, min, max, increment: step } }, {});
-  if (axis.length > MAX_PERMUTATION_VISITS) throw new Error("permutation work budget exceeded");
+  if (axis.length > MAX_PERMUTATION_VISITS) throw problemError(variationProblem("visit-budget", { phase: "plan", names: [axis.id], numbers: { visits: axis.length, limit: MAX_PERMUTATION_VISITS } }));
   return Array.from({ length: axis.length }, (_, index) => axis.at(index));
 }
 
@@ -164,7 +225,7 @@ export function generatePermutations(ranges, currentValues, imageParams = {}, { 
   let width = 1, visits = 0;
   for (const axis of plan.axes) {
     width *= axis.length; visits += width;
-    if (visits > MAX_PERMUTATION_VISITS) throw new Error("permutation work budget exceeded; increase the increment or reduce the axes");
+    if (visits > MAX_PERMUTATION_VISITS) throw problemError(variationProblem("visit-budget", { phase: "plan", names: [...plan.axes].sort((a, b) => b.length - a.length).slice(0, 3).map(axis => `${axis.id} (${axis.length})`), numbers: { visits, limit: MAX_PERMUTATION_VISITS } }));
   }
   const output = [];
   const visit = (index, values, current) => {
@@ -184,19 +245,20 @@ export function generatePermutations(ranges, currentValues, imageParams = {}, { 
 // belongs to the compiler. Counting never allocates the Cartesian product.
 export function permutationPlan(ranges, currentValues, imageParams = {}, { sameHost = true } = {}) {
   const { enabled, imgEnabled } = permutationAxes(ranges, imageParams);
-  if (enabled.length + imgEnabled.length > MAX_PERMUTATION_AXES) throw new Error("permutation axis work budget exceeded");
+  if (enabled.length + imgEnabled.length > MAX_PERMUTATION_AXES) throw problemError(variationProblem("axis-budget", { phase: "plan", numbers: { axes: enabled.length + imgEnabled.length, limit: MAX_PERMUTATION_AXES } }));
   const axes = [];
   for (const [id, range] of enabled) {
+    const fail = (code, context) => problemError(variationProblem(code, { phase: "plan", parameter: { id }, ...context }));
     if ([range.min, range.max, range.increment].some(value => typeof value === "bigint") || [range.min, range.max, range.increment].every(Number.isSafeInteger)) {
       const integer = value => {
         if (typeof value === "bigint") return value;
-        if (!Number.isSafeInteger(value)) throw new Error("Exact integer ranges require integer bounds/increment");
+        if (!Number.isSafeInteger(value)) throw fail("range-integer", { value, field: Object.keys(range).find(key => range[key] === value) });
         return BigInt(value);
       };
       const min = integer(range.min), max = integer(range.max), increment = integer(range.increment);
-      if (increment <= 0n) throw new Error("every enabled range needs a positive increment");
+      if (increment <= 0n) throw fail("range-step", { value: range.increment, field: "Step" });
       const size = max < min ? 0n : ((max - min) * 2n + increment) / (increment * 2n) + 1n;
-      if (size > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("range is too large");
+      if (size > BigInt(Number.MAX_SAFE_INTEGER)) throw fail("range-size", { numbers: { from: String(min), to: String(max), step: String(increment), count: String(size), limit: Number.MAX_SAFE_INTEGER } });
       const length = Number(size), at = index => {
         const value = min + BigInt(index) * increment;
         return value >= BigInt(Number.MIN_SAFE_INTEGER) && value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : value;
@@ -208,10 +270,10 @@ export function permutationPlan(ranges, currentValues, imageParams = {}, { sameH
       axes.push({ id, length, at, isCurrent, matches });
       continue;
     }
-    if (!Number.isFinite(range.increment) || range.increment <= 0) throw new Error("every enabled range needs a positive increment");
-    if (!Number.isFinite(range.min) || !Number.isFinite(range.max)) throw new Error("range bounds must be finite");
+    if (!Number.isFinite(range.increment) || range.increment <= 0) throw fail("range-step", { value: range.increment, field: "Step" });
+    if (!Number.isFinite(range.min) || !Number.isFinite(range.max)) throw fail("range-bounds", { value: !Number.isFinite(range.min) ? range.min : range.max, field: !Number.isFinite(range.min) ? "From" : "To" });
     const length = Math.max(0, Math.round((range.max - range.min) / range.increment) + 1);
-    if (!Number.isSafeInteger(length)) throw new Error("range is too large");
+    if (!Number.isSafeInteger(length)) throw fail("range-size", { numbers: { from: range.min, to: range.max, step: range.increment, count: String(length), limit: Number.MAX_SAFE_INTEGER } });
     const at = index => Math.round((range.min + index * range.increment) * 1e10) / 1e10;
     const isCurrent = value => Object.hasOwn(currentValues, id) && typeof currentValues[id] === "number" && formatValue(value) === formatValue(currentValues[id]);
     let matches = 0;
@@ -300,11 +362,16 @@ export function parseSemicolonList(raw) {
 // Only explicit labels create Cartesian axes; substitution changes their tokens
 // and leaves every other character intact. Missing values keep the row
 // inert. Clearing the field yields one empty string for sweep-to-empty.
-export function expandTextAxes(text, tplValues = {}) {
+export function expandTextAxes(text, tplValues = {}, context = {}) {
   const template = String(text ?? "");
   const labels = templateLabels(template);
   const axes = labels.map(label => templateValue(tplValues, label));
   if (axes.some(values => !Array.isArray(values) || !values.length)) return [];
+  let product = 1n, visits = 0n;
+  for (const values of axes) { product *= BigInt(values.length); visits += product; }
+  const requested = product > BigInt(Number.MAX_SAFE_INTEGER) ? String(product) : Number(product);
+  if (visits > BigInt(MAX_PERMUTATION_VISITS)) throw problemError(variationProblem("template-budget", {
+    phase: "compile", ...context, names: labels, numbers: { requested, visits: String(visits), limit: MAX_PERMUTATION_VISITS } }));
   return cartesianProduct(axes).map(combo => {
     const values = Object.fromEntries(labels.map((label, index) => [label, combo[index]]));
     return template.replace(/\{\{([^{}]+?)\}\}/g, (match, name) => values[name.trim()] ?? match);
@@ -323,15 +390,23 @@ export function templateReplaceWithProof(template, values, currentValues, labelM
       if (label && !aliases.has(label)) aliases.set(label, param);
     }
   }
+  const shortened = [], unresolved = [];
   let complete = !/[{}]/.test(template.replace(/\{[^{}]*\}/g, ""));
+  if (!complete) unresolved.push({ token: template.replace(/\{[^{}]*\}/g, ""), detail: "unbalanced braces" });
   const text = template.replace(/\{([^{}]*)\}/g, (_, key) => {
     const canonical = parseParamId(key);
     const resolved = lookup.has(key) ? key : aliases.get(key);
-    if ((canonical || resolved !== undefined) && lookup.has(resolved)) return namingToken(lookup.get(resolved), kinds.get(resolved));
+    if ((canonical || resolved !== undefined) && lookup.has(resolved)) {
+      const value = lookup.get(resolved), kind = kinds.get(resolved), text = namingToken(value, kind);
+      const before = byteLength(tokenText(value, kind)), after = byteLength(text);
+      if (before > after) shortened.push({ before, after, limit: TOKEN_NAME_BUDGET });
+      return text;
+    }
     complete = false;
+    unresolved.push({ token: `{${key}}`, detail: "unknown parameter" });
     return `{${key}}`;
   });
-  return { text, complete };
+  return { text, complete, ...(unresolved.length ? { unresolved } : {}), ...(shortened.length ? { shortened } : {}) };
 }
 
 export function templateReplace(template, values, currentValues, labelMap = {}, params = []) {
@@ -351,12 +426,13 @@ export function validRunAcknowledgement(value) {
 // Exact effective operations, derived from the request rather than a second
 // acknowledgement whitelist. Enabled-empty is invalid, never an omitted axis.
 export function runOperationFields(request) {
+  const invalid = (detail, context = {}) => problemError(variationProblem("plan-binding", { phase: "compile", detail, ...context }));
   const fields = { ranges: [], imageParams: [], naming: ["prefix", "suffix"], rangeSelections: [], imageSelections: [] };
   for (const [channel, selections] of [["ranges", "rangeSelections"], ["imageParams", "imageSelections"]]) {
-    if (!record(request[channel] ?? {})) throw new Error(`Invalid ${channel} plan`);
+    if (!record(request[channel] ?? {})) throw invalid(`Invalid ${channel} plan`, { field: channel });
     for (const [id, axis] of Object.entries(request[channel] ?? {})) {
-      if (!record(axis) || typeof axis.enabled !== "boolean") throw new Error(`Choose whether ${id} is enabled`);
-      if (Object.hasOwn(request[channel === "ranges" ? "imageParams" : "ranges"] ?? {}, id)) throw new Error(`Ambiguous operation: ${id}`);
+      if (!record(axis) || typeof axis.enabled !== "boolean") throw invalid(`Choose whether ${id} is enabled`, { parameter: { id } });
+      if (Object.hasOwn(request[channel === "ranges" ? "imageParams" : "ranges"] ?? {}, id)) throw invalid(`Ambiguous operation: ${id}`, { parameter: { id } });
       fields[selections].push(id);
       if (!axis.enabled) continue;
       if (channel === "imageParams" && (!Array.isArray(axis.values) || !axis.values.length)) throw new Error(`${id}: choose at least one value before Run`);
@@ -378,12 +454,12 @@ export function targetRunPlan(payload, catalogue) {
     operations.push({ id: `rangeSelections:${id}`, parameter: id, channel: "rangeSelections", disposition: applicable ? axis.enabled ? "apply" : "off" : "absent-relative-numeric" });
     if (axis.enabled) operations.push({ id: `ranges:${id}`, parameter: id, channel: "ranges", disposition: applicable ? "apply" : "absent-relative-numeric" });
     if (applicable) ranges[id] = axis;
-    if (applicable && axis.enabled && !numeric(index.get(id))) throw new Error(`${id}: numeric parameter is missing from this target`);
+    if (applicable && axis.enabled && !numeric(index.get(id))) throw problemError(variationProblem("parameter-missing", { phase: "compile", parameter: { id } }));
   }
   for (const [id, axis] of Object.entries(payload.imageParams)) {
     operations.push({ id: `imageSelections:${id}`, parameter: id, channel: "imageSelections", disposition: axis.enabled ? "apply" : "off" });
     if (axis.enabled) operations.push({ id: `imageParams:${id}`, parameter: id, channel: "imageParams", disposition: "apply" });
-    if (axis.enabled && !index.has(id)) throw new Error(`${id}: parameter is missing from this target`);
+    if (axis.enabled && !index.has(id)) throw problemError(variationProblem("parameter-missing", { phase: "compile", parameter: { id } }));
   }
   operations.push(...["prefix", "suffix"].map(parameter => ({ id: `naming:${parameter}`, parameter, channel: "naming", disposition: "apply" })));
   const request = { ...payload, ranges };
@@ -444,7 +520,7 @@ export function resolveRelativeRanges(ranges, currentValues) {
     if ([cur, r.min, r.max, ...r.clamp].some(value => typeof value === "bigint")) {
       const exact = value => {
         if (typeof value === "bigint") return value;
-        if (!Number.isSafeInteger(value)) throw new Error("Exact relative integer ranges require integer offsets and bounds");
+        if (!Number.isSafeInteger(value)) throw problemError(variationProblem("range-integer", { phase: "plan", parameter: { id: key }, value, relative: true }));
         return BigInt(value);
       };
       const [clo, chi] = r.clamp.map(exact), base = exact(cur);

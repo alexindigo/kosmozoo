@@ -10,19 +10,22 @@ import { Thumbnail } from "./Thumbnail.js";
 import { ImageAction } from "./ImageAction.js";
 import { SingleLineText } from "../../components/SingleLineText.js";
 import { ParameterRow } from "./ParameterRow.js";
-import { useClickOutside } from "../../lib/click-outside.js";
+import { useAltKey } from "../../lib/alt-key.js";
 import { isFileDrag, droppedFiles, classifyImageFiles, nearestImageTile, imageInsertIndex } from "./image-drop.js";
+import { acquisitionProblems } from "./problem-presentation.js";
+import { ProblemFeedback } from "./ProblemFeedback.js";
 
 const COMFY_ROOTS = [{ value: "input", label: "imported" }, { value: "output", label: "generated" }];
 
 export function ImageSetPanel(props) {
-  let fileInput, content, addButton;
-  const [adding, setAdding] = createSignal(false), [folder, setFolder] = createSignal(false);
+  let fileInput;
+  const [folder, setFolder] = createSignal(false);
   const row = () => props.row();
   const [dropping, setDropping] = createSignal(false), [status, setStatus] = createSignal("");
   let dragDepth = 0;
   const clearDrop = () => { dragDepth = 0; setDropping(false); };
   const addFiles = (resources, index, enable = false) => {
+    if (props.onFiles) return props.onFiles(resources, index);
     const result = classifyImageFiles(resources, name => UPLOAD_IMG_EXT.test(name));
     setStatus(result.status);
     if (!result.images.length) return;
@@ -30,8 +33,6 @@ export function ImageSetPanel(props) {
     props.onAdd(result.images.map(uploadImage), index);
   };
   onCleanup(props.registerEditor({ suspend: clearDrop, resume() {} }));
-  useClickOutside(() => content, event => { if (!event.target.closest?.('.vz-input-popover')) setAdding(false); });
-  createEffect(() => { if (adding()) onCleanup(props.registerPopup(() => { setAdding(false); addButton.focus(); })); });
   return <ParameterRow class={`vz-imgrow vz-image-set${dropping() ? " vz-image-dropping" : ""}`} row={row} enabled={() => row().enabled} filteredOut={props.filteredOut}
     attributes={{ "data-image-id": props.id,
       onDragEnter: event => { if (isFileDrag(event.dataTransfer)) { event.preventDefault(); dragDepth++; setDropping(true); } },
@@ -41,21 +42,15 @@ export function ImageSetPanel(props) {
     }} onEnable={props.onEnable} onInsert={props.onInsert} registerFocus={props.registerFocus}
     status={<Show when={status()}><SingleLineText class="vz-image-drop-status" role="status" value={status()} /></Show>}
     summary={`${row().items.length} ${row().items.length === 1 ? "image" : "images"}`}>
-    <div class="vz-image-content" ref={content}>
-      <Show when={!row().items.length}><p class="vz-image-empty">Add images to vary this input.</p></Show>
-      <ImageGrid images={row().images} onMove={props.onMove} registerEditor={props.registerEditor}
-        dropping={dropping()} onFiles={(resources, index) => { clearDrop(); addFiles(resources, index, true); }}
-        thumbnail={props.thumbnail} archiveThumbnail={props.archiveThumbnail} targetThumbnail={props.targetThumbnail} pathThumbnail={props.pathThumbnail} registerThumbnail={props.registerThumbnail}
-        rememberFocus={props.rememberFocus} onRemove={props.onRemove}>
-        <button ref={addButton} type="button" class="vz-image-plus" aria-label="Add images" aria-expanded={adding()}
-          {...focusMemory(props.rememberFocus)} onClick={() => setAdding(!adding())}>+</button>
-      </ImageGrid>
-      <div class="vz-image-add" hidden={!adding()}>
-        <Show when={props.sources.length}><InputPicker label="ComfyUI images" roots={COMFY_ROOTS} noun={root => `${root === "output" ? "generated" : "imported"} images`}
+    <div class="vz-image-content">
+      <div class="vz-image-add">
+        <ProblemFeedback problems={acquisitionProblems({ sources: props.sources, pexels: props.pexels.status?.(), chooserError: props.folderError?.() })} />
+        <Show when={props.pexels.status?.().error}><button type="button" class="vz-thumbnail-retry" onClick={props.pexels.retryServices}>Retry Pexels services</button></Show>
+        <Show when={props.sources.length}><InputPicker label="ComfyUI images" totalSelected={row().items.length + row().acquiring} parameterLabel={row().label} roots={COMFY_ROOTS} noun={root => `${root === "output" ? "generated" : "imported"} images`}
           sources={props.sources} sourceInputs={props.sourceInputs} inputState={props.inputState}
           onSource={props.onSource} onRetrySource={props.onRetrySource} registerTabKeys={props.registerTabKeys}
           current={row().current} currentRoot={row().currentRoot ?? (row().fromOutput ? "output" : "input")} positionRevision={row().images} thumbnail={props.inputThumbnail} registerThumbnail={props.registerThumbnail}
-          onToggle={props.onToggleInput}
+          onToggle={props.onToggleInput} peekTarget={props.peekTarget}
           registerPopup={props.registerPopup} registerEditor={props.registerEditor} rememberFocus={props.rememberFocus} /></Show>
         <input type="file" ref={fileInput} class="vz-imgfilespick" hidden multiple accept="image/*" onChange={e => {
           addFiles({ files: [...e.currentTarget.files] }); e.currentTarget.value = "";
@@ -68,19 +63,27 @@ export function ImageSetPanel(props) {
         </ImageAction>
         {/* External catalogues sit apart from the engine's own (trusted) sources. */}
         <Show when={props.pexels.sources().length}><div class="vz-image-external">
-          <InputPicker label="Pexels photos" noun={() => "photos"} remoteSearch
+          <InputPicker label="Pexels photos" totalSelected={row().items.length + row().acquiring} parameterLabel={row().label} noun={() => "photos"} remoteSearch
             sources={props.pexels.sources()} sourceInputs={(service, _root, query) => props.pexels.results(service, query)}
             inputState={(service, photo) => props.pexels.state(service, photo)} itemLabel={props.pexels.label}
             onSource={(service, _root, query) => props.pexels.request(service, query)} onMore={(service, _root, query) => props.pexels.more(service, query)}
             onRetrySource={(service, _root, query) => props.pexels.retry(service, query)} registerTabKeys={props.registerTabKeys}
             positionRevision={row().images} thumbnail={(service, photo) => props.pexels.thumbnail(service, photo)} registerThumbnail={props.registerThumbnail}
             onToggle={(service, photo) => props.pexels.toggle(service, photo)}
+            fullImage={(service, photo) => props.pexels.image(service, photo)} peekTarget={props.peekTarget}
             registerPopup={props.registerPopup} registerEditor={props.registerEditor} rememberFocus={props.rememberFocus} />
         </div></Show>
         <div class="vz-image-folder" hidden={!folder()}>
-        <FolderImages onAdd={props.onAddFolder} capability={props.folderCapability} onChoose={props.onChooseFolder}
+         <FolderImages onAdd={props.onAddFolder} capability={props.folderCapability} capabilityError={props.folderError} onRetryCapability={props.onRetryFolder} onChoose={props.onChooseFolder}
           registerEditor={props.registerEditor} rememberFocus={props.rememberFocus} />
         </div>
+      </div>
+      <div class="vz-image-picked">
+        <Show when={!row().items.length}><p class="vz-image-empty">Add images to vary this input.</p></Show>
+        <ImageGrid images={row().images} onMove={props.onMove} registerEditor={props.registerEditor}
+          dropping={dropping()} onFiles={(resources, index) => { clearDrop(); addFiles(resources, index, true); }}
+          thumbnail={props.thumbnail} archiveThumbnail={props.archiveThumbnail} targetThumbnail={props.targetThumbnail} pathThumbnail={props.pathThumbnail} registerThumbnail={props.registerThumbnail}
+          rememberFocus={props.rememberFocus} onRemove={props.onRemove} onRotate={props.onRotate} peekTarget={props.peekTarget} />
       </div>
     </div>
   </ParameterRow>;
@@ -93,6 +96,13 @@ function ImageGrid(props) {
   const gap = Symbol("native-file-gap");
   let fileGeometry = null, fileIndex = null;
   const refs = new Map(), animations = new Map();
+  const alt = useAltKey();
+  // A rotated image is a new tile at the same position; keyboard focus follows it.
+  const rotate = async (item, element) => {
+    const index = identities().indexOf(imageIdentity(item)), focused = element.contains(document.activeElement);
+    if (!await props.onRotate(item, alt() ? "ccw" : "cw") || !focused) return;
+    refs.get(identities()[index])?.querySelector('.vz-image-rotate button')?.focus({ preventScroll: true });
+  };
   const [preview, setPreview] = createSignal(null), [lifted, setLifted] = createSignal(null);
   // Readonly thumbnail/comparison updates replace view records, not the user's
   // ordered set. Only a real membership/order change can retire its held gesture.
@@ -125,8 +135,7 @@ function ImageGrid(props) {
     // the hit-test boundary and oscillate the insertion point under the cursor.
     fileGeometry ??= tileGeometry();
     const origin = grid.getBoundingClientRect();
-    const index = event.target.closest('.vz-image-plus') ? identities().length
-      : imageInsertIndex(fileGeometry, event.clientX - origin.left, event.clientY - origin.top);
+    const index = imageInsertIndex(fileGeometry, event.clientX - origin.left, event.clientY - origin.top);
     if (index !== fileIndex) { fileIndex = index; const keys = [...identities()]; keys.splice(index, 0, gap); reorder(keys); }
   };
   const finish = commit => {
@@ -182,7 +191,8 @@ function ImageGrid(props) {
     <For each={order()}>{identity => {
       if (identity === gap) return <div class="vz-image-drop-gap" aria-hidden="true" />;
       const item = () => props.images.find(image => imageIdentity(image) === identity);
-      return <div ref={element => { refs.set(identity, element); onCleanup(() => refs.delete(identity)); }}
+      let tile;
+      return <div ref={element => { tile = element; refs.set(identity, element); onCleanup(() => refs.delete(identity)); }}
         class={`vz-image-tile${lifted() === identity ? ' vz-image-dragging' : ''}`} tabindex="0" role="group"
         aria-label={item()?.kind === "target" ? "Current image - each selected image uses itself" : item()?.name}
         title={item()?.kind === "target" ? "Current image - each selected image uses itself" : item()?.path || item()?.name} data-image-name={item()?.name} data-image-kind={item()?.kind}
@@ -195,10 +205,9 @@ function ImageGrid(props) {
           } else if (['Delete', 'Backspace'].includes(event.key)) { event.preventDefault(); props.onRemove(item()); }
         }}>
         <ImageTile item={item} thumbnail={props.thumbnail} archiveThumbnail={props.archiveThumbnail} targetThumbnail={props.targetThumbnail} pathThumbnail={props.pathThumbnail} registerThumbnail={props.registerThumbnail}
-          rememberFocus={props.rememberFocus} onRemove={() => props.onRemove(item())} />
+          rememberFocus={props.rememberFocus} onRemove={() => props.onRemove(item())} alt={alt} onRotate={() => rotate(item(), tile)} peekTarget={props.peekTarget} />
       </div>;
     }}</For>
-    {props.children}
   </div>;
 }
 
@@ -211,15 +220,21 @@ function ImageTile(props) {
     const src = URL.createObjectURL(file()); setUrl(src); onCleanup(() => URL.revokeObjectURL(src));
   });
   // Local File previews are object URLs; engine thumbnails are admitted
-  // displays, registered only while the tile is near the viewport.
+  // displays, registered only while the tile is near the viewport. The
+  // preview is this tile's peek surface: it peeks its own current picture.
+  const peek = props.peekTarget?.(() => ({ src: url(), local: !!file(), name: name() })) ?? {};
   return <>
-    <div class="vz-image-preview"><Thumbnail src={url()} name={name()} local={!!file()} lazy register={props.registerThumbnail} rememberFocus={props.rememberFocus} /></div>
+    <div class="vz-image-preview" {...peek}><Thumbnail src={url()} name={name()} local={!!file()} lazy register={props.registerThumbnail} rememberFocus={props.rememberFocus} /></div>
     <Show when={props.item()?.sameCurrent}><span class="vz-image-same" aria-hidden="true" /></Show>
     <Show when={props.item()?.each}><span class="vz-image-each">each</span></Show>
     <div class="vz-image-remove">
       <IconButton chrome variant="overlay" icon={iconSvg("x")} title={`Remove ${props.item()?.name}`} onAction={props.onRemove} />
     </div>
-    <Show when={props.item()?.pending}><span class="vz-image-check" role="status" aria-label="Checking image…" /></Show>
+    <Show when={props.item()?.rotating || props.item()?.pending}><span class="vz-image-check" role="status" aria-label={props.item()?.rotating ? "Rotating image…" : "Checking image…"} /></Show>
     <Show when={props.item()?.error}><SingleLineText class="vz-image-error vz-image-inspection-error" role="status" value={props.item()?.error} /></Show>
+    <Show when={props.item()?.rotatable}><div class="vz-image-rotate">
+      <IconButton chrome variant="overlay" icon={iconSvg(props.alt() ? "rotate-2" : "rotate-clockwise-2")}
+        title={props.alt() ? "Rotate counter-clockwise" : "Rotate clockwise"} onAction={props.onRotate} />
+    </div></Show>
   </>;
 }

@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { freshRecipe } = require('./recipe-helpers.cjs');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, settledCount } = require('./variation-add-helpers.cjs');
 module.exports = async ({ cdp, check, KZ, FAKE }) => {
   const denoise = '[data-param-key="9.denoise"]', steps = '[data-param-key="9.steps"]';
   const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
@@ -21,9 +21,10 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
     await cdp.poll("!document.querySelector('.vz-panel')");
   };
   const invalid = async (row, label) => {
+    const count = await settledCount(cdp);
     const state = await cdp.evaluate(`(()=>{const row=document.querySelector(${JSON.stringify(row)});return {
       header:row.querySelector('.vz-parameter-current').textContent,
-      count:document.querySelector('.vz-count').textContent,
+      count:${JSON.stringify(count)},
       sidebar:document.querySelector('.vz-right').innerText,
       messages:document.querySelector('.vz-messages').textContent,
       runDisabled:document.querySelector('.vz-run').disabled}})()`);
@@ -34,8 +35,8 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
     const received = (await jobs()).slice(before);
     console.log('numeric invalid Run:', JSON.stringify({ result, received }));
     check(`${label}: header/sidebar invalid; Run rejects with zero prompts`,
-      state.header === '— values' && state.count === '—' && state.sidebar.includes('Check the recipe') &&
-      state.messages.includes(label) && !state.runDisabled && result.status === 'invalid' && received.length === 0);
+      state.header === '— values' && state.count === '--' && state.sidebar.includes('Check the recipe') &&
+      state.messages.includes(label) && state.runDisabled && result.status === 'invalid' && received.length === 0);
   };
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
   try {
@@ -51,7 +52,7 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
     }
     await invalid(denoise, 'From');
     await field(`${denoise} .vz-range-field:first-child input`, '0.9');
-    await cdp.poll("document.querySelector('.vz-count').textContent==='2'");
+    await settledCount(cdp, '2');
     assert.equal(await cdp.evaluate(`document.querySelector('${denoise} .vz-parameter-current').textContent`), '3 values');
     let before = (await jobs()).length;
     assert.equal((await invoke('variations.run')).adopted, true);
@@ -67,7 +68,7 @@ module.exports = async ({ cdp, check, KZ, FAKE }) => {
     await field(`${steps} .vz-value-field input`, '');
     await invalid(steps, 'Value');
     await field(`${steps} .vz-value-field input`, '22');
-    await cdp.poll("document.querySelector('.vz-count').textContent==='1'");
+    await settledCount(cdp, '1');
     assert.equal(await cdp.evaluate(`document.querySelector('${steps} .vz-parameter-current').textContent`), '1 value');
     before = (await jobs()).length;
     assert.equal((await invoke('variations.run')).adopted, true);

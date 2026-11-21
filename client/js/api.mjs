@@ -32,14 +32,15 @@ export async function req(method, path, body, { priority, signal, raw = false, j
     priority: priority === "background" ? "low" : "auto",
   });
   if (!r.ok) {
-    let detail = "";
+    let detail = "", problem = null;
     try {
       const payload = JSON.parse(await r.text());
+      problem = payload?.problem ?? null;
       const error = typeof payload?.error === "string" ? payload.error : payload?.error?.message;
       const reason = typeof payload?.reason === "string" ? payload.reason : "";
       detail = [typeof error === "string" ? error : "", reason].filter(Boolean).join(": ").trim().slice(0, 1024);
     } catch { /* malformed/non-JSON bodies still retain their HTTP failure */ }
-    throw new ApiError(method, path, r.status, detail);
+    throw Object.assign(new ApiError(method, path, r.status, detail), problem ? { problem } : {});
   }
   return json.parse(await r.text());
 }
@@ -74,6 +75,7 @@ export const api = {
   inputBytesUrl: (collection, name) => entryBytesUrl(collection, name, { kind: "input" }),
   setJudgment: (collection, name, fields) => req("PATCH", `${entryUrl(collection, name)}/judgment`, fields),
   deleteEntry: (collection, name) => req("DELETE", entryUrl(collection, name)),
+  deleteDownVoted: (collection, body, origin, options) => req("POST", `/api/collections/${enc(collection)}/delete-down-voted?origin=${enc(JSON.stringify(origin))}`, body, options),
   settings: (ns) => req("GET", `/api/settings/${enc(ns)}`),
   setSettings: (ns, kv) => req("PATCH", `/api/settings/${enc(ns)}`, kv),
   prefetch: (options) => req("GET", "/api/prefetch", undefined, options),

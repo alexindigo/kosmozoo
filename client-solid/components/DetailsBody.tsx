@@ -12,6 +12,7 @@ import { useAppStore, clampSplit } from "../store/app-store.js";
 import { fmtBytes, fmtGenerationTime } from "../store/fields.js";
 import { useDrag } from "../lib/drag.js";
 import { flash } from "../lib/flash.js";
+import { singleLineText } from "../lib/single-line-text.js";
 import { useMeasuredSrc } from "../lib/img-measure.js";
 import { MetaBody } from "./MetaBody.js";
 import { Zoomable } from "./Zoomable.js";
@@ -157,7 +158,7 @@ function Head(props) {
   return (
     <>
     <div class="ws-head">
-      <div class="ws-name" title={name()}>{name()}</div>
+      <div class="ws-name" title={name()}>{singleLineText(name())}</div>
       <div class="ws-sub">{subText()}</div>
       <Show when={lineageSrc()}>
         {(s) => (

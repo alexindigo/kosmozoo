@@ -11,6 +11,7 @@ import { mediaFailure } from "../store/media-failure.js";
 import { mediaGeometry, AUDIO_SIZE } from "../store/media-geometry.js";
 import { iconSvg } from "/js/icons.mjs";
 import { nativeResourceDeadline } from "../lib/img-measure.js";
+import { singleLineText } from "../lib/single-line-text.js";
 
 export function MediaBox(props) {
   const [loaded, setLoaded] = createSignal(false), [error, setError] = createSignal(false);
@@ -187,7 +188,7 @@ export function MediaBox(props) {
       </Show>
     </Show>
     <Show when={phase() === "error"}><div class="media-failure" role="status">
-      <span class="media-failure-name">{props.alt}</span><span>{mediaFailure(props.kind ?? "image", props.failed ? props.failureCode : displayError())}</span>
+      <span class="media-failure-name" title={props.alt}>{singleLineText(props.alt)}</span><span>{mediaFailure(props.kind ?? "image", props.failed ? props.failureCode : displayError())}</span>
       <span>Download it to open elsewhere.</span>
       <Show when={!props.failed && props.onErrorClick}><span>click to retry</span></Show>
     </div></Show>

@@ -6,7 +6,7 @@ const { CDP, collectPageErrors } = require('./cdp.cjs');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 const assert = require('node:assert/strict');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, settledCount } = require('./variation-add-helpers.cjs');
 const { openImageAdd, waitForInputPicker } = require('./image-picker-helpers.cjs');
 const ENGINE = process.env.E2E_ENGINE || 'http://127.0.0.1:18260';
 const FAKE = process.env.E2E_FAKE || 'http://127.0.0.1:18261';
@@ -130,13 +130,12 @@ const control = (base, body) => fetch(base + '/__test/activity', { method: 'POST
     await page.keyTrusted('Escape', { vk: 27 });
     await page.poll("!document.querySelector('.vz-input-search')");
     await page.poll(`document.querySelectorAll('.vz-image-set .vz-image-tile').length===2&&!document.querySelector('.vz-image-set .vz-image-tile.is-pending')`, 15000).catch(() => {});
-    await page.poll(`document.querySelector('.vz-count')?.textContent.trim()==='1'`, 15000).catch(() => {});
-    const count = await page.evaluate(`document.querySelector('.vz-count')?.textContent.trim()`);
+    const count = await settledCount(page, '1', { timeout: 15000 }).catch(() => page.evaluate(`document.querySelector('.vz-count')?.textContent.trim()`));
     check('variations: the temp-equal File is excluded as current; the same-named input remains', count === '1', String(count));
     await capture('roots-variations');
     const before = await (await fetch(FAKE + '/__test/enqueues')).json();
     await page.clickAt('.vz-run');
-    await page.poll(`(async()=>(await (await fetch(${JSON.stringify(FAKE + '/__test/enqueues')})).json()).length>${before.length})()`, 15000).catch(() => {});
+    await page.poll(`document.querySelector('.vz-queued')?.textContent==='1 confirmed, 0 partial, 0 unknown, 0 unsent; 1 sent.'`, 30000);
     const jobs = (await (await fetch(FAKE + '/__test/enqueues')).json()).slice(before.length);
     check('variations: the captured prompt assigns only the input-root name', jobs.length === 1 && jobs[0].prompt['13'].inputs.image === NAME &&
       jobs[0].prompt['11'].inputs.image === NAME && jobs[0].prompt['12'].inputs.image === `${NAME} [output]`, JSON.stringify(jobs.map(job => job.prompt['13'].inputs)));

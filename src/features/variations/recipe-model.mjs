@@ -2,6 +2,9 @@
 // stay in the dialog; native Files remain opaque identities at this boundary.
 import { resourceReference, resourceReferenceProblem, parseExactJson, stringifyExactJson } from "../../parameters.mjs";
 import { templateLabels } from "./shared.mjs";
+import { isEntryLeaf } from "../../entry-path.mjs";
+import { variationProblem, problemError } from "./problems.mjs";
+const recipeError = (detail, path) => problemError(variationProblem("recipe-internal", { phase: "compile", path, detail }));
 
 const nativeFile = value => typeof File !== "undefined" && value instanceof File;
 export function snapshotDraft(value) {
@@ -29,14 +32,14 @@ export function numericText(raw) {
     if (typeof value !== "number" && typeof value !== "bigint") return null;
     stringifyExactJson(value);
     return value;
-  } catch { return null; }
+  } catch (error) { if (error.code === "exact-json") throw problemError(variationProblem("exact-json", { phase: "compile" })); return null; }
 }
 const targetIdentity = Symbol("target-image");
 export const imageReference = item => item.kind === "reference" ? resourceReference(item.value) : item.kind === "input" ? resourceReference(item.name) : null;
 export const imageReferenceValue = item => item.kind === "reference" ? item.value : item.kind === "input" ? item.name : null;
 export const imageIdentity = item => imageReference(item) ? JSON.stringify([imageReference(item).root, imageReference(item).name]) : item.kind === "target" ? targetIdentity : item.kind === "upload" ? item.file : item.kind === "archive" ? JSON.stringify(["archive", item.runId, item.resourceId]) : item.kind === "server-path" ? item.path : item.name;
 export const sameImage = (a, b) => (imageReference(a) && imageReference(b) || a.kind === b.kind) && imageIdentity(a) === imageIdentity(b);
-const filename = name => typeof name === "string" && name.length > 0 && !/[\\/\x00-\x1f\x7f]/.test(name) && ![".", ".."].includes(name);
+const filename = isEntryLeaf;
 export const validImageSet = items => Array.isArray(items) && items.every(item => item &&
   (item.kind === "target" || imageReference(item) && !resourceReferenceProblem(null, imageReferenceValue(item)) || filename(item.name) && (item.kind === "upload" && nativeFile(item.file) && item.file.name === item.name ||
     item.kind === "server-path" && typeof item.path === "string" && item.path.startsWith("/") && !/[\x00-\x1f\x7f]/.test(item.path) &&
@@ -79,25 +82,25 @@ export const validRecipeValue = (type, value) => {
 };
 export function recipeField(domain, name) {
   const definition = Object.hasOwn(RECIPE_FIELDS, domain) && Object.hasOwn(RECIPE_FIELDS[domain], name) ? RECIPE_FIELDS[domain][name] : null;
-  if (!definition) throw new Error(`Unclassified editable field: ${domain}.${name}`);
+  if (!definition) throw recipeError(`Unclassified editable field: ${domain}.${name}`, `${domain}.${name}`);
   return definition;
 }
 // One exhaustive classification over the declared leaves, shared by all compilers.
 export function recipeDispositions(snapshot, bindings) {
   const key = path => JSON.stringify(path), active = new Map();
   for (const binding of bindings) {
-    if (active.has(key(binding.path))) throw new Error(`Overlapping recipe disposition: ${key(binding.path)}`);
+    if (active.has(key(binding.path))) throw recipeError(`Overlapping recipe disposition: ${key(binding.path)}`, key(binding.path));
     active.set(key(binding.path), binding);
   }
   const output = [];
   for (const [domain, rows] of Object.entries(snapshot)) {
-    if (!Object.hasOwn(RECIPE_FIELDS, domain)) throw new Error(`Unclassified recipe domain: ${domain}`);
+    if (!Object.hasOwn(RECIPE_FIELDS, domain)) throw recipeError(`Unclassified recipe domain: ${domain}`, domain);
     for (const [id, entry] of Object.entries(rows)) {
       const fields = RECIPE_FIELDS[domain];
       for (const name of Object.keys(entry.values)) recipeField(domain, name);
       for (const [name, definition] of Object.entries(fields)) {
         const value = entry.values[name];
-        if (!validRecipeValue(definition.type, value)) throw new Error(`Invalid recipe value: ${domain}.${name}`);
+        if (!validRecipeValue(definition.type, value)) throw recipeError(`Invalid recipe value: ${domain}.${name}`, `${domain}.${id}.${name}`);
         const paths = name === "tpl" && Object.keys(value).length ? Object.keys(value).map(label => [domain, id, name, label]) : [[domain, id, name]];
         for (const path of paths) {
           const binding = active.get(key(path));
@@ -105,12 +108,12 @@ export function recipeDispositions(snapshot, bindings) {
           const numericActive = domain !== "numeric" || name === "mode" || (entry.values.mode === "value" ? name === "value" : name !== "value");
           const required = domain === "naming" || name === "enabled" || entry.values.enabled && numericActive &&
             (name !== "tpl" || path.length === 4 && templateLabels(entry.values.text).includes(path[3]));
-          if (!binding && required) throw new Error(`Unclassified active recipe value: ${key(path)}`);
+          if (!binding && required) throw recipeError(`Unclassified active recipe value: ${key(path)}`, key(path));
           output.push({ path, disposition: binding ? "active" : "retained", ...(binding ? { operation: `${binding.channel}:${binding.id}` } : {}) });
         }
       }
     }
   }
-  if (active.size) throw new Error(`Unclassified compiler binding: ${active.keys().next().value}`);
+  if (active.size) throw recipeError(`Unclassified compiler binding: ${active.keys().next().value}`, active.keys().next().value);
   return freezeRecipe(output);
 }

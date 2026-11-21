@@ -11,6 +11,7 @@ import { iconSvg } from "/js/icons.mjs";
 import { useAppStore } from "../store/app-store.js";
 import { Zoomable } from "./Zoomable.js";
 import { IconButton } from "./IconButton.js";
+import { singleLineText } from "../lib/single-line-text.js";
 
 function AnchorCard(props) {
   const store = useAppStore();
@@ -49,7 +50,7 @@ function AnchorCard(props) {
         onOpen={() => store.handles.invoke("workbench.pickAnchor", { name: props.anchor.name })}
       />
       <div class="ctitle">
-        <span class="aname" title={props.anchor.name}>{props.anchor.name}</span>
+        <span class="aname" title={props.anchor.name}>{singleLineText(props.anchor.name)}</span>
         <span class="btnwrap">
           <IconButton
             icon={iconSvg("info-circle", 14)} variant="ainfo" title="embedded parameters"

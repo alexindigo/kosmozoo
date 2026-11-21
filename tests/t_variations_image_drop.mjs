@@ -13,8 +13,8 @@ Deno.test("image drop: classifies native Files, skips nonimages and reports fold
   assert(isFileDrag(transfer)); assert(!isFileDrag({ types: ["text/plain"], items: [] }));
   const result = classifyImageFiles(droppedFiles(transfer), name => /\.png$/i.test(name));
   assert(result.images[0] === image);
-  assertEquals(result.status, "1 file skipped — not images · Folders: use Add folder");
-  assertEquals(classifyImageFiles({ files: [text, text] }, () => false).status, "2 files skipped — not images");
+  assertEquals(result.status, "1 file skipped - not images; Folders: use Add folder");
+  assertEquals(classifyImageFiles({ files: [text, text] }, () => false).status, "2 files skipped - not images");
   assertEquals(droppedFiles({ files: [image] }).files, [image]);
 });
 

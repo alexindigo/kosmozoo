@@ -4,7 +4,7 @@ const { openImageAdd, pickInput, waitForSelectedPreviews } = require('./image-pi
 const { workPath } = require('./paths.cjs');
 const { addParameter } = require('./variation-add-helpers.cjs');
 module.exports = async ({ cdp, KZ, FAKE, check }) => {
-  const invoke = (id,args={}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
+  const invoke = require('./variation-add-helpers.cjs').variationInvoker(cdp,KZ);
   const jobs = async () => (await fetch(FAKE+'/__test/enqueues')).json();
   const close = async () => {
     await cdp.evaluate(`(async()=>{${KZ}.handles.invoke('variations.close');return true})()`);

@@ -1,12 +1,11 @@
 // Output-root-relative POSIX addresses shared by engine and browser. Never
 // normalize an invalid address into another entry's identity or decode it here.
-const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
 const MAX_ENTRY_PATH_CHARS = 4096;
 const MAX_ENTRY_PATH_COMPONENTS = 128;
 const MAX_INVENTORY_FOLDER_CHARS = 16 * 1024 * 1024;
 
 export function isEntryPath(name) {
-  return typeof name === "string" && name.length > 0 && name.length <= MAX_ENTRY_PATH_CHARS && !CONTROL.test(name) &&
+  return typeof name === "string" && name.length > 0 && name.length <= MAX_ENTRY_PATH_CHARS && !name.includes("\0") &&
     !name.includes("\\") && !/^[a-z]:\//i.test(name) &&
     validComponents(name);
 }
@@ -16,7 +15,14 @@ function validComponents(name) {
   return parts.length <= MAX_ENTRY_PATH_COMPONENTS && parts.every(part => part !== "" && part !== "." && part !== "..");
 }
 
+// Names Kosmozoo itself creates (output prefixes, uploads it names) stay strict:
+// a host may list any name (isEntryPath), but Kosmozoo never writes a line break
+// or other control character into one.
+const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+export const isCreatedEntryPath = name => isEntryPath(name) && !CONTROL.test(name);
+
 export const isFolderPath = (folder) => folder === "" || isEntryPath(folder);
+export const isEntryLeaf = name => isEntryPath(name) && !name.includes("/");
 
 // The flat local backing retains its POSIX basename grammar. Backslashes and
 // drive-looking text are ordinary local leaf characters, not Comfy paths.

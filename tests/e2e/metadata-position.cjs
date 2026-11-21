@@ -44,12 +44,12 @@ module.exports = async ({ ENGINE, FAKE, check }) => {
         await control({ publish: names.map((name, i) => ({ name, fixture: 'bulk', width: 96, height: 64,
           mtime: 2150000000 + sequence * 100 - i,
           graph: { '1': { class_type: nodeType, inputs: { token: `${token}-${i}` } } } })) });
-        await request(`/api/collections/${source}/entries?inventory=1`);
+        await request(`/api/collections/${source}/entries?inventory=1&arrivals=items-v1`);
         await request(`/api/collections/${source}/want`, { files: names, interest: 'dimensions' });
         let inventory;
         const deadline = Date.now() + 10000;
         do {
-          inventory = await request(`/api/collections/${source}/entries?inventory=1`);
+          inventory = await request(`/api/collections/${source}/entries?inventory=1&arrivals=items-v1`);
           if (names.every(name => inventory.entries.some(e => e.name === name && e.width && e.height))) break;
           await new Promise(resolve => setTimeout(resolve, 50));
         } while (Date.now() < deadline);

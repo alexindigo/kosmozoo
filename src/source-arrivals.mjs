@@ -12,15 +12,23 @@ export class SourceArrivals {
     // Sequence ownership belongs to publication, not only the relist caller.
     for (const name of visible) if (!source.names.has(name)) source.names.set(name, ++source.sequence);
     const sequences = visible.map(name => source.names.get(name)).sort((a,b) => a-b);
-    const visibleRanges = [];
-    for (const sequence of sequences) {
-      const last = visibleRanges.at(-1);
-      if (last && last[1] + 1 === sequence) last[1] = sequence; else visibleRanges.push([sequence, sequence]);
-    }
+    const ranges = values => {
+      const result = [];
+      for (const sequence of values) {
+        const last = result.at(-1);
+        if (last && last[1] + 1 === sequence) last[1] = sequence; else result.push([sequence, sequence]);
+      }
+      return Object.freeze(result.map(Object.freeze));
+    };
+    const votes = new Map((this.store.votedNames?.(id) ?? []).map(({name, vote}) => [source.names.get(name), vote]));
+    const visibleRanges = ranges(sequences);
+    const downVotedRanges = ranges(sequences.filter(sequence => votes.get(sequence) === 'down'));
+    const upVotedRanges = ranges(sequences.filter(sequence => votes.get(sequence) === 'up'));
     const latestVisibleSeq = sequences.at(-1) ?? 0, before = source.projection;
-    if (before?.sequence === source.sequence && JSON.stringify(before.visibleRanges) === JSON.stringify(visibleRanges)) return;
+    if (before?.sequence === source.sequence && ['visibleRanges', 'downVotedRanges', 'upVotedRanges'].every(key =>
+      JSON.stringify(before[key]) === JSON.stringify({visibleRanges, downVotedRanges, upVotedRanges}[key]))) return;
     const next = Object.freeze({ sequence: source.sequence, latestVisibleSeq,
-      revision: (before?.revision ?? 0) + 1, visibleRanges: Object.freeze(visibleRanges.map(Object.freeze)) });
+      revision: (before?.revision ?? 0) + 1, visibleRanges, downVotedRanges, upVotedRanges });
     source.projection = next;
     source.wire = JSON.stringify(next);
     for (const fn of this.#listeners) fn(id);

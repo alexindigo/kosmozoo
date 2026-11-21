@@ -21,6 +21,30 @@ import { isResourceRoot } from "./parameters.mjs";
 const SCHEMA_VERSION = 11;
 const CORE_JUDGMENT_FIELDS = new Set(["vote", "favorite", "bookmark", "notes"]);
 
+// @db/sqlite int64 reads already return Number for safe INTEGERs. Keep the
+// Store's number-only contract for every row/tuple, including migration reads;
+// an unsafe database integer must fail here, not round or leak into JSON.
+function numericRow(row) {
+  if (row === undefined) return row;
+  for (const [column, value] of Object.entries(row)) {
+    if (typeof value !== "bigint") continue;
+    const number = Number(value);
+    if (!Number.isSafeInteger(number)) throw new RangeError(`SQLite column ${column} exceeds the safe integer range: ${value}`);
+    row[column] = number;
+  }
+  return row;
+}
+
+function prepare(db, sql) {
+  const statement = db.prepare(sql);
+  return {
+    run: (...args) => statement.run(...args),
+    get: (...args) => numericRow(statement.get(...args)),
+    all: (...args) => statement.all(...args).map(numericRow),
+    value: (...args) => numericRow(statement.value(...args)),
+  };
+}
+
 const MIGRATIONS = [
   // v0 → v1: create the single-table metadata store.
   (db) => {
@@ -60,8 +84,8 @@ const MIGRATIONS = [
         updated_at   REAL NOT NULL
       );
     `);
-    const rows = db.prepare("SELECT host, filename FROM metadata").all();
-    const ins = db.prepare("INSERT OR IGNORE INTO files (host, filename) VALUES (?, ?)");
+    const rows = prepare(db, "SELECT host, filename FROM metadata").all();
+    const ins = prepare(db, "INSERT OR IGNORE INTO files (host, filename) VALUES (?, ?)");
     const txn = db.transaction((rs) => {
       for (const r of rs) ins.run(r.host, r.filename);
     });
@@ -98,7 +122,7 @@ const MIGRATIONS = [
   (db) => {
     db.exec(`ALTER TABLE files ADD COLUMN stamp TEXT`);
     db.exec(`UPDATE files SET stamp = CAST(mtime AS TEXT) WHERE mtime IS NOT NULL`);
-    const cols = db.prepare("PRAGMA table_info(input_cache)").all().map((c) => c.name);
+    const cols = prepare(db, "PRAGMA table_info(input_cache)").all().map((c) => c.name);
     if (cols.includes("mtime") && !cols.includes("stamp")) {
       db.exec(`
         CREATE TABLE input_cache_new (
@@ -161,7 +185,7 @@ const MIGRATIONS = [
   // committed but the runner's separate version write did not.
   (db) => {
     db.transaction(() => {
-      const columns = new Set(db.prepare("PRAGMA table_info(collection)").all().map((c) => c.name));
+      const columns = new Set(prepare(db, "PRAGMA table_info(collection)").all().map((c) => c.name));
       for (const name of ["pinned", "auto_refresh"]) {
         if (!columns.has(name)) {
           db.exec(`ALTER TABLE collection ADD COLUMN ${name} INTEGER NOT NULL DEFAULT 0 CHECK (${name} IN (0, 1))`);
@@ -212,13 +236,13 @@ MIGRATIONS.push(db => db.transaction(() => db.exec(`
 // from the v11 upgrade, the legacy fold or an older engine writing a schema-11
 // database, so every open assigns the missing ones; assigned values never change.
 function assignMissingIncarnations(db) {
-  const assign = db.prepare("UPDATE collection SET incarnation = ? WHERE id = ? AND incarnation IS NULL");
-  for (const row of db.prepare("SELECT id FROM collection WHERE incarnation IS NULL").all()) assign.run(crypto.randomUUID(), row.id);
+  const assign = prepare(db, "UPDATE collection SET incarnation = ? WHERE id = ? AND incarnation IS NULL");
+  for (const row of prepare(db, "SELECT id FROM collection WHERE incarnation IS NULL").all()) assign.run(crypto.randomUUID(), row.id);
 }
 
 // v10 -> v11: registration identity survives engine lifetimes and upgrade retries.
 MIGRATIONS.push(db => db.transaction(() => {
-  const columns = db.prepare("PRAGMA table_info(collection)").all();
+  const columns = prepare(db, "PRAGMA table_info(collection)").all();
   if (!columns.some(column => column.name === "incarnation")) db.exec("ALTER TABLE collection ADD COLUMN incarnation TEXT");
   assignMissingIncarnations(db);
 })());
@@ -257,6 +281,7 @@ const STATEMENTS = {
   variationEffectPrepare: `INSERT INTO variation_effect(run_id,effect_id,kind,request_json,request_hash,state,created_at,updated_at)
     VALUES(?,?,?,?,?,'prepared',?,?)`,
   variationEffectClaim: "UPDATE variation_effect SET state = 'started',updated_at = ? WHERE run_id = ? AND effect_id = ? AND state = 'prepared'",
+  variationEffectSent: "UPDATE variation_effect SET result_json = '{\"sent\":true}',updated_at = ? WHERE run_id = ? AND effect_id = ? AND kind = 'permutation' AND state = 'started' AND result_json IS NULL",
   variationEffectResult: "UPDATE variation_effect SET state = ?,result_json = ?,updated_at = ? WHERE run_id = ? AND effect_id = ? AND state = 'started'",
   variationRecoveryEffects: "UPDATE variation_effect SET state = 'uncertain',updated_at = ? WHERE state = 'started'",
   variationRecoveryExecutionRuns: "SELECT DISTINCT run_id FROM variation_lease WHERE kind = 'execution'",
@@ -311,6 +336,7 @@ const STATEMENTS = {
   entryGone: "UPDATE entry SET state = 'gone', last_seen = ? WHERE collection = ? AND name = ? AND kind = 'output'",
   entryHide: "UPDATE entry SET hidden = 1, last_seen = ? WHERE collection = ? AND name = ? AND kind = 'output'",
   hiddenNames: "SELECT name FROM entry WHERE collection = ? AND kind = 'output' AND hidden = 1",
+  votedNames: "SELECT name, vote FROM entry WHERE collection = ? AND kind = 'output' AND vote IN ('up', 'down')",
   contentGet: "SELECT hash, width, height, meta, has_workflow, ext, bytes, updated_at FROM content WHERE hash = ?",
   contentIngest: `INSERT INTO content (hash, bytes, width, height, updated_at) VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(hash) DO UPDATE SET bytes = COALESCE(excluded.bytes, content.bytes),
@@ -394,7 +420,7 @@ export class Store {
   static async open(stateDir, { settings, feedbackPath } = {}) {
     const s = new Store();
     const dbPath = join(stateDir, "metadata.db");
-    s.#db = new Database(dbPath);
+    s.#db = new Database(dbPath, { int64: true });
     try {
       s.#db.exec("PRAGMA journal_mode = WAL");
       // the schema declares ON DELETE CASCADE and entry→content references —
@@ -402,7 +428,7 @@ export class Store {
       s.#db.exec("PRAGMA foreign_keys = ON");
       s.#runMigrations();
       s.#q = Object.fromEntries(
-        Object.entries(STATEMENTS).map(([k, sql]) => [k, s.#db.prepare(sql)]),
+        Object.entries(STATEMENTS).map(([k, sql]) => [k, prepare(s.#db, sql)]),
       );
       await s.#foldV7(settings);
       // After every boot-time row writer (migrations and the legacy fold).
@@ -588,6 +614,9 @@ export class Store {
       if (this.#q.variationEffectResult.run(state, resultJson, Date.now(), id, effectId)) this.#q.variationBump.run();
     })();
   }
+  variationEffectSent(id, effectId) {
+    this.#q.variationEffectSent.run(Date.now(), id, effectId);
+  }
   variationEffects(id) { return this.#q.variationEffects.all(id); }
 
   // --- feedback.json v1 → entry columns (one-time) -------------------------
@@ -698,7 +727,7 @@ export class Store {
   }
 
   #runMigrations() {
-    const [cur] = this.#db.prepare("PRAGMA user_version").value();
+    const [cur] = prepare(this.#db, "PRAGMA user_version").value();
     for (let v = cur; v < SCHEMA_VERSION; v++) {
       MIGRATIONS[v](this.#db);
       this.#db.exec(`PRAGMA user_version = ${v + 1}`);
@@ -721,7 +750,7 @@ export class Store {
         // collections from the settings hosts map
         const map = settings?.get("core.hosts", "map", {}) ?? {};
         for (const [name, address] of Object.entries(map)) {
-          d.prepare("INSERT OR IGNORE INTO collection (id, kind, address, created_at, incarnation) VALUES (?, ?, ?, ?, ?)")
+          prepare(d, "INSERT OR IGNORE INTO collection (id, kind, address, created_at, incarnation) VALUES (?, ?, ?, ?, ?)")
             .run(name, kindFor(address), address, now, crypto.randomUUID());
         }
         // a host the old tables know but the map doesn't gets an offline
@@ -729,14 +758,14 @@ export class Store {
         // comfy — the rehearsal report lists these by name
         const known = new Set(Object.keys(map));
         for (const table of ["files", "input_cache"]) {
-          for (const r of d.prepare(`SELECT DISTINCT host FROM ${table}`).all()) {
+          for (const r of prepare(d, `SELECT DISTINCT host FROM ${table}`).all()) {
             if (known.has(r.host)) continue;
             known.add(r.host);
             console.warn(
               `fold v7: host "${r.host}" appears in ${table} but not the hosts map —` +
                 ` created as an offline collection (kind comfy, no address)`,
             );
-            d.prepare("INSERT OR IGNORE INTO collection (id, kind, address, created_at, incarnation) VALUES (?, 'comfy', NULL, ?, ?)")
+            prepare(d, "INSERT OR IGNORE INTO collection (id, kind, address, created_at, incarnation) VALUES (?, 'comfy', NULL, ?, ?)")
               .run(r.host, now, crypto.randomUUID());
           }
         }
@@ -770,9 +799,9 @@ export class Store {
         for (const [host, names] of Object.entries(hidden)) {
           this.#ensureCollection(host);
           for (const name of names) {
-            d.prepare("INSERT OR IGNORE INTO entry (collection, name, kind, state, first_seen, last_seen) VALUES (?, ?, 'output', 'seen', ?, ?)")
+            prepare(d, "INSERT OR IGNORE INTO entry (collection, name, kind, state, first_seen, last_seen) VALUES (?, ?, 'output', 'seen', ?, ?)")
               .run(host, name, now, now);
-            d.prepare("UPDATE entry SET hidden = 1 WHERE collection = ? AND name = ? AND kind = 'output'")
+            prepare(d, "UPDATE entry SET hidden = 1 WHERE collection = ? AND name = ? AND kind = 'output'")
               .run(host, name);
           }
         }
@@ -1081,6 +1110,11 @@ export class Store {
     );
   }
 
+  // Narrow judgment facts for arrival publication; no content/metadata join.
+  votedNames(collection) {
+    return this.#q.votedNames.all(collection);
+  }
+
   // Hide one entry (the fallback delete on no-delete hosts).
   entryHide(collection, name) {
     this.#ensureCollection(collection);
@@ -1247,6 +1281,7 @@ export class Store {
       pruned.plugins == null ? null : JSON.stringify(pruned.plugins),
       now, host, filename,
     );
+    this.arrivals.changed(host);
     return { ok: true, judgment: this.#readJudgment(host, filename) };
   }
 

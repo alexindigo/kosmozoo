@@ -74,8 +74,9 @@ Deno.test("Value: batch compilation fixes the same absolute value for different 
 Deno.test("Value: recipe rejects unclassified modes and non-text values", () => {
   const { editor } = editorRig();
   try {
-    assertThrows(() => editor.edit("numeric", "n.denoise", "mode", "invented"));
-    assertThrows(() => editor.edit("numeric", "n.denoise", "value", Infinity));
+    assertEquals(editor.edit("numeric", "n.denoise", "mode", "invented"), false);
+    assertEquals(editor.edit("numeric", "n.denoise", "value", Infinity), false);
+    assertEquals(editor.problems().at(-1).code, "edit-failed");
     assert(!editor.dirty());
   } finally { editor.dispose(); }
 });

@@ -5,7 +5,7 @@
 // catalogue shape), plus the usual engine and fake ComfyUI.
 const assert = require('node:assert/strict'), fs = require('node:fs');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
-const { addParameter, removeRecordedImage } = require('./variation-add-helpers.cjs');
+const { addParameter, removeRecordedImage, settledCount } = require('./variation-add-helpers.cjs');
 const { openImageAdd, waitForInputPicker, waitForSelectedPreviews } = require('./image-picker-helpers.cjs');
 const B = process.env.E2E_ENGINE, F = process.env.E2E_FAKE, P = process.env.E2E_PEXELS, BARE = process.env.E2E_PEXELS_BARE, FRAMES = process.env.E2E_PEXELS_FRAMES;
 const D = process.env.E2E_EVIDENCE;
@@ -50,7 +50,10 @@ const pexelsTrigger = '.vz-image-add .vz-image-external .vz-input-trigger';
     assert.equal(await c.evaluate(`document.querySelectorAll('.pexels-service-key').length`), 1);
     await addService('Unreachable', 'http://127.0.0.1:20499');
     const lights = `[...document.querySelectorAll('.pexels-service')].map(r=>[r.querySelector('.pexels-service-name').textContent,r.querySelector('.pexels-service-status').className.replace('pexels-service-status','').trim(),r.querySelector('.pexels-service-problem')?.textContent??''])`;
-    await c.poll(`JSON.stringify(${lights})===${JSON.stringify(JSON.stringify([['Home photos', 'is-ok', ''], ['Bare', 'is-ok', ''], ['Frames', 'is-ok', ''], ['Unreachable', 'is-error', "Couldn't reach Unreachable"]]))}`, 20000);
+    // The unreachable service names itself, the request and the recovery (row 236).
+    const reached = `${lights}.map(([name,state,problem])=>[name,state,problem.startsWith('Unreachable could not be reached while loading curated photos, page 1: ')&&problem.endsWith('Check its address and connectivity, then Retry.')?'unreachable':problem])`;
+    await c.poll(`JSON.stringify(${reached})===${JSON.stringify(JSON.stringify([['Home photos', 'is-ok', ''], ['Bare', 'is-ok', ''], ['Frames', 'is-ok', ''], ['Unreachable', 'is-error', 'unreachable']]))}`, 20000);
+    assert.equal(await c.evaluate(`!!document.querySelector('.pexels-service:nth-child(4) [title="Check Unreachable again"]')`), true);
     await shot('settings-services');
     await c.clickAt('.pexels-service:nth-child(4) [title="Remove Unreachable"]');
     await c.poll(`!!document.querySelector('.pexels-service-confirm')`);
@@ -118,7 +121,7 @@ const pexelsTrigger = '.vz-image-add .vz-image-external .vz-input-trigger';
       try {
         await c.clickAt(pexelsTrigger); await waitForInputPicker(c);
         await c.poll(`window.__pxHeld && ${busy} && document.querySelector('.vz-input-activity')?.textContent==='Loading photos from Home photos…'`);
-        assert.equal(await c.evaluate(`document.querySelector('.vz-input-summary [role=status]').textContent`), '0 selected');
+        assert.equal(await c.evaluate(`document.querySelector('.vz-input-summary [role=status]').textContent`), '0 selected in listing; 0 in image set.');
         await c.poll(`document.querySelectorAll('.vz-input-placeholder').length>0`);
         const placeholders = await c.evaluate(`[...document.querySelectorAll('.vz-input-placeholder')].map(el=>({width:el.getBoundingClientRect().width,height:el.getBoundingClientRect().height}))`);
         assert(placeholders.length > 0);
@@ -164,7 +167,7 @@ const pexelsTrigger = '.vz-image-add .vz-image-external .vz-input-trigger';
     const options = await c.evaluate(`[...document.querySelectorAll('.vz-input-option')].slice(0,2).map(o=>o.dataset.inputName)`);
     for (const option of options) await c.clickAt(`.vz-input-option[data-input-name="${option}"]`);
     await c.poll(`document.querySelectorAll('.vz-input-option[aria-selected=true]').length===2`, 20000);
-    assert.equal(await c.evaluate(`document.querySelector('.vz-input-summary [role=status]').textContent`), '2 selected');
+    assert.equal(await c.evaluate(`document.querySelector('.vz-input-summary [role=status]').textContent`), '2 selected in listing; 2 in image set.');
     await shot('picker-selected');
 
     // A service without curated photos asks for a search instead of failing.
@@ -194,7 +197,7 @@ const pexelsTrigger = '.vz-image-add .vz-image-external .vz-input-trigger';
     await waitForSelectedPreviews(c);
     await shot('image-set');
 
-    step('run'); const run = await invoke('variations.run');
+    step('run'); await settledCount(c, '3'); const run = await invoke('variations.run');
     assert.equal(run.adopted, true, JSON.stringify(run) + ' ' + await c.evaluate(`document.querySelector('.vz-messages')?.textContent`)); assert.equal(run.submitted, 3);
     const enqueues = await json(F, '/__test/enqueues');
     const values = enqueues.map(e => e.prompt?.['470']?.inputs?.image ?? e['470']?.inputs?.image).sort();

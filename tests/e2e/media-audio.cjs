@@ -1,4 +1,5 @@
 // Audio uses the production registry/size owner/player/metadata/commands.
+const { settledCount } = require('./variation-add-helpers.cjs');
 module.exports = async ({ page, ENGINE, KZ, check, capture, control }) => {
   const formats = { flac: 'audio/flac', mp3: 'audio/mpeg', opus: 'audio/ogg; codecs="opus"', wav: 'audio/wav' };
   const names = Object.keys(formats).map(ext => `audio/fixture_e2e-audio.${ext}`);
@@ -86,8 +87,9 @@ module.exports = async ({ page, ENGINE, KZ, check, capture, control }) => {
       if(ext==='flac')await capture(page,'audio-workbench');
       check(`${ext}: workbench Space advances audio`,true);
       await invoke('workbench.close');await page.poll(`[...document.querySelectorAll('#diffStage audio')].every(e=>e.paused&&!e.getAttribute('src'))`);
-      await invoke('variations.open',{id:`fake:${name}`});await page.poll(`document.querySelectorAll('.vz-slider-row').length>0`,20000);
-      await page.clickAt('.vz-slider-row[data-param-key="2.steps"] .checkbox');await page.poll(`Number(document.querySelector('.vz-count').textContent)>0`);
+      await invoke('variations.open',{id:`fake:${name}`});
+      await require('./variation-add-helpers.cjs').addParameter(page, '2.steps');
+      await settledCount(page, { test: 'Number(count)>0' });
       const run = await invoke('variations.run');
       const enqueues = await (await fetch((process.env.E2E_FAKE??'http://127.0.0.1:18261')+'/__test/enqueues')).json();
       check(`${ext}: embedded graph probes and Variations submits SaveAudio jobs`, run?.status==='submitted' && run.submitted===run.total && run.submitted>0 && enqueues.some(r=>r.prompt?.['92']?.class_type==='SaveAudio'),JSON.stringify(run));

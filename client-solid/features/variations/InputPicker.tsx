@@ -12,7 +12,10 @@ import { TextField } from "../../components/TextField.js";
 import { Tabs } from "../../components/Tabs.js";
 import { iconSvg } from "/js/icons.mjs";
 import { sameOrigin } from "/shared/source-origin.mjs";
+import { ProblemFeedback } from "./ProblemFeedback.js";
+import { variationProblem, problemText } from "/shared/features/variations/problems.mjs";
 import { scrollSample, lookaheadBand, lookaheadRange, demandOrder, demandRank, VELOCITY_IDLE_MS } from "./lookahead.js";
+import { pickerJudgments } from "./picker-judgments.js";
 
 const TILE_SIZE = 96, GAP = 6, ROW_HEIGHT = TILE_SIZE + GAP;
 
@@ -25,10 +28,11 @@ export function InputPicker(props) {
   const [open, setOpen] = createSignal(false), [query, setQuery] = createSignal("");
   const [activeSource, setActiveSource] = createSignal(props.sources[0].source);
   const [resourceRoot, setResourceRoot] = createSignal(props.roots?.[0]?.value ?? null);
+  const [judgments, setJudgments] = createSignal({});
   const source = createMemo(() => props.sources.find(origin => origin.source === activeSource()) ?? props.sources[0]);
   const search = () => props.remoteSearch ? query().trim() : "";
   createEffect(() => { if (open()) props.onSource(source(), resourceRoot(), search()); });
-  const catalogue = () => props.sourceInputs(source(), resourceRoot(), search());
+  const catalogue = () => props.sourceInputs(source(), resourceRoot(), search(), judgments());
   const [suspended, setSuspended] = createSignal(false);
   const id = `vz-image-input-${createUniqueId().replace(/[^\w-]/g, "")}`;
   let root, trigger, surface = null, requestPlacement = () => {};
@@ -82,9 +86,10 @@ export function InputPicker(props) {
     <ImageAction class="select-trigger control-size-md vz-input-trigger" ref={trigger}
       aria-expanded={open()} aria-haspopup="listbox" aria-controls={id} {...focusMemory(props.rememberFocus)} onClick={() => setOpen(!open())}><SingleLineText value={props.label} /><Chevron /></ImageAction>
     <Show when={open()}>
-      <InputOptions id={id} query={query} onQuery={setQuery} files={catalogue().files}
+      <InputOptions id={id} query={query} onQuery={setQuery} files={catalogue().files} totalSelected={props.totalSelected} parameterLabel={props.parameterLabel}
         context={JSON.stringify([source(), resourceRoot(), search()])} resourceRoot={resourceRoot()} onRoot={setResourceRoot}
         roots={props.roots} noun={props.noun(resourceRoot())} remoteSearch={!!props.remoteSearch}
+        judgments={judgments()} onJudgment={name => setJudgments(value => ({ ...value, [name]: !value[name] }))}
         itemLabel={name => props.itemLabel?.(source(), name) ?? name}
         onMore={() => props.onMore?.(source(), resourceRoot(), search())}
         onGeometry={() => requestPlacement()}
@@ -93,13 +98,14 @@ export function InputPicker(props) {
         state={name => props.inputState(source(), name, resourceRoot())}
         current={props.current != null && sameOrigin(source(), props.sources[0]) && resourceRoot() === props.currentRoot ? props.current : null}
         thumbnail={name => props.thumbnail(source(), name, resourceRoot())} registerThumbnail={props.registerThumbnail}
+        full={name => (props.fullImage ?? props.thumbnail)(source(), name, resourceRoot())} peekTarget={props.peekTarget}
         onToggle={name => { props.onToggle(source(), name, resourceRoot()); requestPlacement(); }} rememberFocus={props.rememberFocus} registerSurface={registerSurface} />
     </Show>
   </div>;
 }
 
 function InputOptions(props) {
-  let panel, search, scrollElement, summary, count, feeds, tabs;
+  let panel, search, scrollElement, summary, tabs;
   const sourceLabel = () => props.source.label ?? props.source.source;
   const activity = () => props.catalogue.appending ? `Loading more ${props.noun}…`
     : props.remoteSearch && props.query().trim() ? `Searching ${sourceLabel()} for "${props.query().trim()}"…`
@@ -109,7 +115,7 @@ function InputOptions(props) {
   const [placed, setPlaced] = createSignal(false);
   // Both first focus and the modal's retained caret restoration belong to this
   // surface. No focus callback may run until its visible placement is committed.
-  let restoreFocus = () => search.focus({ preventScroll: true });
+  let restoreFocus = () => scrollElement.focus({ preventScroll: true });
   const rememberFocus = restore => props.rememberFocus?.(() => {
     if (placed()) restore();
     else restoreFocus = restore;
@@ -157,7 +163,7 @@ function InputOptions(props) {
   });
   // A remote catalogue's context already names its search; appended pages keep
   // the reader's place instead of returning to the top.
-  createEffect(() => { props.context; if (!props.remoteSearch) filtered(); setPendingFocus(null); setActive(0); restoreFocus = () => search?.focus({ preventScroll: true }); virtualizer.scrollToOffset(0); });
+  createEffect(() => { props.context; if (!props.remoteSearch) filtered(); setPendingFocus(null); setActive(0); virtualizer.scrollToOffset(0); });
   createEffect(() => { files().filter(selected).length; props.onGeometry(); });
   // Paged catalogues ask for more once the mounted window nears the end.
   createEffect(() => {
@@ -191,9 +197,10 @@ function InputOptions(props) {
         if (!panel.isConnected || !panel.matches(":popover-open")) return null;
         const style = getComputedStyle(panel), list = getComputedStyle(scrollElement);
         const horizontalChrome = ["paddingLeft", "paddingRight", "borderLeftWidth", "borderRightWidth"].reduce((sum, key) => sum + (parseFloat(style[key]) || 0), 0);
-        const floor = count.getBoundingClientRect().width + (feeds ? feeds.scrollWidth + (parseFloat(getComputedStyle(summary).columnGap) || 0) : 0) + horizontalChrome;
         const gridWidth = Number(style.getPropertyValue("--vz-input-columns")) * (TILE_SIZE + GAP) - GAP;
-        const width = Math.max(gridWidth + horizontalChrome + scrollElement.offsetWidth - scrollElement.clientWidth, floor), listHeight = parseFloat(list.maxHeight);
+        // The footer owns an intrinsic count/feed track, independent of the
+        // popup's allocation. Its scroll width also survives viewport clipping.
+        const width = Math.max(gridWidth + scrollElement.offsetWidth - scrollElement.clientWidth, summary.scrollWidth) + horizontalChrome, listHeight = parseFloat(list.maxHeight);
         if (!Number.isFinite(width) || !Number.isFinite(listHeight)) return null;
         const chrome = search.getBoundingClientRect().height + summary.getBoundingClientRect().height + (tabs?.getBoundingClientRect().height ?? 0) + (parseFloat(style.rowGap) || 0) * (tabs ? 2 : 1) + ["paddingTop", "paddingBottom", "borderTopWidth", "borderBottomWidth", "rowGap"]
           .reduce((sum, key) => sum + (parseFloat(style[key]) || 0), 0);
@@ -208,7 +215,7 @@ function InputOptions(props) {
   });
   const move = event => {
     if (event.target.closest?.('[role=tablist]')) return;
-    if (event.target.closest?.(".vz-thumbnail-retry")) return;
+    if (event.target.closest?.(".vz-thumbnail-retry, .vz-input-filters")) return;
     if (!["ArrowLeft", "ArrowRight", "ArrowDown", "ArrowUp", "Enter"].includes(event.key)) return;
     event.preventDefault();
     if (event.key === "Enter") { const name = filtered()[active()]; if (name) props.onToggle(name); }
@@ -218,7 +225,7 @@ function InputOptions(props) {
       const next = Math.max(0, Math.min(filtered().length - 1, active() + delta));
       // A scroll event may mount the destination on a later frame. Keep a
       // stable key target until that row exists, rather than focusing a retired tile.
-      search.focus({ preventScroll: true });
+      scrollElement.focus({ preventScroll: true });
       setActive(next); setPendingFocus(next);
       virtualizer.scrollToIndex(Math.floor(next / columns()), { align: "auto" });
     }
@@ -240,17 +247,26 @@ function InputOptions(props) {
           registerKeys={props.registerTabKeys} rememberFocus={rememberFocus} />
       </div>
     </Show>
-    <TextField ref={search} type="search" role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls={`${props.id}-list`}
+    <div class="vz-input-toolbar">
+      <Show when={props.roots}><div class="vz-input-filters" role="group" aria-label="Judgment filters">
+        <For each={pickerJudgments}>{filter => <IconButton chrome size="md" variant={`plain vz-input-filter is-${filter.name}`}
+          active={!!props.judgments[filter.name]} disabled={props.resourceRoot !== "output"}
+          aria-label={filter.label} title={props.resourceRoot === "output" ? filter.label : "Input files have no votes"}
+          onFocus={focusMemory(rememberFocus).onFocus} onAction={() => props.onJudgment(filter.name)}
+          icon={'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="5" /></svg>'} />}</For>
+      </div></Show>
+      <TextField ref={search} type="search" role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls={`${props.id}-list`}
       aria-activedescendant={placement() && filtered().length ? `${props.id}-option-${active()}` : undefined}
       class="vz-input-search" placeholder={`Search ${props.noun}...`} aria-label={`Search ${props.noun}`}
       {...focusMemory(rememberFocus)} value={props.query()} onInput={e => props.onQuery(e.currentTarget.value)}
       trailing={<Show when={props.query()}><IconButton chrome size="md" variant="plain vz-search-clear" title="Clear search"
         icon={iconSvg("x")} onAction={() => { props.onQuery(""); search.focus(); }} /></Show>} />
+    </div>
     <div class="vz-input-source-panel" id={`${props.id}-source-panel`} role="tabpanel"
       aria-labelledby={[props.sources.length > 1 ? `${props.id}-tab-${encodeURIComponent(props.source.source)}` : "", props.roots ? `${props.id}-feed-${props.resourceRoot}` : ""].filter(Boolean).join(" ") || undefined}
       aria-label={props.sources.length > 1 || props.roots ? undefined : `${sourceLabel()} ${props.noun}`}>
     <div class="vz-input-activity-bar" classList={{ "is-active": !!props.catalogue.pending }} aria-hidden="true" />
-    <div class="vz-input-list" classList={{ "is-stale": !!props.catalogue.stale }} id={`${props.id}-list`} ref={scrollElement} role="listbox"
+    <div class="vz-input-list" classList={{ "is-stale": !!props.catalogue.stale }} id={`${props.id}-list`} ref={scrollElement} role="listbox" tabindex="0" {...focusMemory(rememberFocus)}
       aria-label={`${sourceLabel()} ${props.noun}`} aria-multiselectable="true" aria-busy={props.catalogue.pending ? "true" : undefined}>
       <div class="vz-input-window" style={{ height: `${Math.max(0, virtualizer.getTotalSize() - GAP)}px` }}>
         <For each={placement() ? thumbnailRows() : []}>{virtual =>
@@ -258,6 +274,8 @@ function InputOptions(props) {
             <For each={rows()[virtual.index]}>{(name, offset) => {
               const index = () => virtual.index * columns() + offset();
               const memory = focusMemory(rememberFocus);
+              const markers = () => props.catalogue.markers?.get(name) ?? [];
+              const peek = props.peekTarget?.(() => ({ src: props.thumbnail(name), full: props.full(name), name: props.itemLabel(name) })) ?? {};
                // Queued demand follows visibility without replacing its keyed
                // native lifetime or aborting an already-started preload.
                 const priority = () => {
@@ -267,14 +285,17 @@ function InputOptions(props) {
                return <Thumbnail class="vz-input-tile" name={name} src={props.thumbnail(name)} register={props.registerThumbnail}
                  order={() => demandRank(virtual.index, virtualizer.range, band().direction)}
                 pending={props.state(name).pending} error={props.state(name).error} onRetry={() => props.onToggle(name)}
-                priority={priority} rememberFocus={rememberFocus} surface={picture => <button type="button" role="option" tabindex="-1" id={`${props.id}-option-${index()}`}
-                aria-label={props.itemLabel(name)} title={props.itemLabel(name)} aria-selected={selected(name)} data-input-name={name}
+                 priority={priority} rememberFocus={rememberFocus} surface={picture => <button type="button" role="option" tabindex={active() === index() ? "0" : "-1"} id={`${props.id}-option-${index()}`}
+                aria-label={[props.itemLabel(name), ...markers().map(marker => marker.label)].join(", ")} title={props.itemLabel(name)} aria-selected={selected(name)} data-input-name={name}
                 class={"vz-input-option" + (active() === index() ? " vz-input-active" : "")}
-                {...memory} onFocus={event => { setActive(index()); memory.onFocus(event); }}
-                onClick={() => { setActive(index()); props.onToggle(name); search.focus(); }}>
+                {...memory} {...peek} onFocus={event => { setActive(index()); memory.onFocus(event); }}
+                 onClick={() => { setActive(index()); props.onToggle(name); }}>
                 {picture}
+                <Show when={markers().length}><span class="vz-input-judgments" aria-hidden="true">
+                  <For each={markers()}>{marker => <span class={`vz-input-judgment is-${marker.name}`} data-judgment={marker.name} />}</For>
+                </span></Show>
                 <Show when={name === props.current}><span class="vz-image-same" aria-hidden="true" /></Show>
-                <Show when={selected(name)}><SingleLineText class="vz-input-selected" aria-hidden="true" value="✓" /></Show>
+                 <Show when={selected(name)}><span class="vz-input-selected" aria-hidden="true" innerHTML={iconSvg("check")} /></Show>
               </button>} />;
             }}</For>
           </div>
@@ -287,19 +308,21 @@ function InputOptions(props) {
           }</For>
         </div>
       </Show>
+      <ProblemFeedback problems={props.catalogue.notices ?? []} />
       <div class="vz-input-status vz-input-failure" hidden={!props.catalogue.error}>
-        <SingleLineText role="status" value={props.catalogue.error ? `Couldn't list ${sourceLabel()}'s ${props.noun}.` : ""} hint={props.catalogue.error} />
+        <SingleLineText role="status" value={props.catalogue.error ?? ""} hint={props.catalogue.error} />
         <button type="button" class="vz-thumbnail-retry" onClick={props.onRetrySource}>Retry</button>
       </div>
       <Show when={!filtered().length && !props.catalogue.pending && !props.catalogue.error}><p class="vz-image-empty">{
-        props.catalogue.searchOnly ? `Search to find ${props.noun} on ${sourceLabel()}.`
+        props.resourceRoot === "output" && pickerJudgments.some(filter => props.judgments[filter.name]) ? "No images match the selected filters"
+        : props.catalogue.searchOnly ? `Search to find ${props.noun} on ${sourceLabel()}.`
         : (props.remoteSearch ? props.query().trim() : files().length) ? `No ${props.noun} match "${props.query().trim()}".` : `No ${props.noun} available.`}</p></Show>
     </div>
     </div>
     <div ref={summary} class="vz-input-summary">
-      <span ref={count} role="status">{files().filter(selected).length} selected</span>
+      <span role="status">{props.totalSelected !== undefined ? variationProblem("picker-selection", { phase: "acquisition", parameter: { label: props.parameterLabel ?? "this input" }, numbers: { visible: filtered().filter(selected).length, total: props.totalSelected } }).message : `${filtered().filter(selected).length} selected in this listing`}</span>
       <Show when={props.catalogue.pending}><SingleLineText class="vz-input-activity" role="status" value={activity()} /></Show>
-      <Show when={props.roots}><div ref={feeds} class="vz-input-feeds"><Tabs label="Image feed" options={props.roots.map(root => ({ ...root, id: `${props.id}-feed-${root.value}` }))}
+      <Show when={props.roots}><div class="vz-input-feeds"><Tabs label="Image feed" options={props.roots.map(root => ({ ...root, id: `${props.id}-feed-${root.value}` }))}
         value={props.resourceRoot} panelId={`${props.id}-source-panel`} onChange={props.onRoot}
         registerKeys={capability => props.registerTabKeys(capability, "feed")} rememberFocus={rememberFocus} /></div></Show>
     </div>

@@ -35,7 +35,8 @@
     "/shared/features/variations/compile.mjs": "./src/features/variations/compile.mjs",
     "/shared/features/variations/recipe-model.mjs": "./src/features/variations/recipe-model.mjs",
     "/shared/features/variations/recipe-compile.mjs": "./src/features/variations/recipe-compile.mjs",
-    "/shared/features/variations/history-codec.mjs": "./src/features/variations/history-codec.mjs"
+    "/shared/features/variations/history-codec.mjs": "./src/features/variations/history-codec.mjs",
+    "/shared/features/variations/problems.mjs": "./src/features/variations/problems.mjs"
   },
   "tasks": {
     "deps": "deno install --frozen --entrypoint build.mjs dev/vendor-browser.mjs src/main.mjs src/cli.mjs plugins/*/plugin.mjs tests/t_*.mjs",

@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
 const { workPath } = require('./paths.cjs');
+const { addParameter } = require('./variation-add-helpers.cjs');
 const ENGINE = process.env.E2E_ENGINE ?? 'http://127.0.0.1:18260';
 const KZ = '(await import("/store/instance.js")).appStore';
 
@@ -33,6 +34,7 @@ const KZ = '(await import("/store/instance.js")).appStore';
     await invoke('workbench.close');
     await page.evaluate("fetch('/api/collections/fake/entries/flux-controlnet.png/bytes').then(r => r.arrayBuffer()).then(() => true)");
     await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
+    await addParameter(page, '9.denoise');
     const row = '[data-param-key="9.denoise"]';
     await page.poll(`!!document.querySelector('${row} .mode-switch')`);
     const range = await inspect(`${row} .mode-switch`);

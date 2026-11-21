@@ -119,7 +119,8 @@ Deno.test("history client: reads coalesce, deletion fences late list results and
   const late = owner.refresh(); await Promise.resolve(); await owner.remove("a");
   resolve({ format: 1, items: [{ id: "a" }, { id: "b" }], nextCursor: null }); await late;
   assertEquals(owner.state().items, [{ id: "b" }]);
-  rejected = true; await owner.remove("b"); assertEquals(owner.state().items, [{ id: "b" }]); assertEquals(owner.state().error, "disk failed");
+  rejected = true; const failure = await assertRejects(() => owner.remove("b")); assertEquals(failure.problem.code, "history-delete");
+  assertEquals(owner.state().items, [{ id: "b" }]); assert(owner.state().error.includes("Could not delete saved Run b: disk failed"));
   owner.dispose();
 });
 Deno.test("history Run: initial immutable capture precedes waits and invalid input remains captured without dispatch", async () => {
@@ -140,7 +141,7 @@ Deno.test("history client: pagination/error recovery and retired late-open lease
     items: before ? [{ id: "b" }] : [{ id: "a" }], nextCursor: before ? null : "next" }),
     historyOpen: () => new Promise(resolve => { resolveOpen = resolve; }), historyRelease: async (id, leaseId) => { released.push([id, leaseId]); } };
   const owner = makeHistoryClient({ api });
-  await owner.refresh(); assertEquals(owner.state().error, "offline"); assertEquals(owner.state().pending, false);
+  await owner.refresh(); assertEquals(owner.state().error, "Could not load first-page saved Runs: offline. Previously loaded entries remain. Retry loading history; this does not rerun jobs."); assertEquals(owner.state().pending, false);
   failure = false; await owner.refresh(); await owner.more();
   assertEquals(owner.state().items, [{ id: "a" }, { id: "b" }]); assertEquals(owner.state().more, false);
   const pending = owner.open("a"); owner.dispose(); resolveOpen({ id: "a", leaseId: "late" });
@@ -184,9 +185,9 @@ Deno.test("run end: the outcome appears together with the end of running, after 
     await running;
     assertEquals(rig.editor.running(), false);
     assert(rig.editor.result().text.startsWith("submitted 1/1"), rig.editor.result().text);
-    assertEquals(rig.editor.result().text.includes("history refresh failed: offline"), failing);
+    assertEquals(rig.editor.result().text.includes("Could not save the final history status"), failing);
     // The result line shows `reason` when present; a history failure must be visible there too.
-    assertEquals((rig.editor.result().reason || "").includes("history refresh failed: offline"), failing);
+    assertEquals((rig.editor.result().reason || "").includes("Could not save the final history status"), failing);
     assertEquals(rig.timers.filter(timer => timer.active).length, failing ? 0 : 1, "the automatic close starts once the run has fully ended, never over a history error");
     rig.editor.dispose();
   }

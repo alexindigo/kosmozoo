@@ -27,7 +27,7 @@ module.exports = async ({ page, evaluate, E, original, permanent }) => {
       const listeners=new Set(),add=window.addEventListener,remove=window.removeEventListener;
       window.addEventListener=function(type,fn,...rest){if(type==='focus'||type==='pageshow')listeners.add(fn);return add.call(this,type,fn,...rest)};
       window.removeEventListener=function(type,fn,...rest){listeners.delete(fn);return remove.call(this,type,fn,...rest)};
-      try { window.disposalFeature=install(store); } finally { window.addEventListener=add; }
+      try { window.disposalFeature=install({...store,reportError:message=>store.actions.status.error(message)}); } finally { window.addEventListener=add; }
       window.disposalHistory=window.disposalFeature.ports.services.history;
       window.disposalOpen=window.disposalHistory.open(${JSON.stringify(original.id)}).then(()=>({published:true}),e=>({error:e.message}));
       window.disposalFinish=()=>{window.disposalDrain=window.disposalFeature.dispose().then(results=>{window.disposalResult=results.map(r=>r.status);return results});window.disposalListeners=listeners.size;window.removeEventListener=remove;};
@@ -47,7 +47,7 @@ module.exports = async ({ page, evaluate, E, original, permanent }) => {
     assert.equal(deletes, 2, 'bounded initial DELETE plus one retry');
     assert.equal(result.open.error, 'History entry unavailable'); assert.equal(result.retained, permanent);
     assert.deepEqual(result.results, [permanent ? 'rejected' : 'fulfilled']);
-    if (permanent) assert(result.error.includes('release failed'));
+    if (permanent) assert(result.error.includes('injected release failure'));
     fs.writeFileSync(E + '/disposal.json', JSON.stringify({ ...result, deletes, permanent }));
     await Promise.all(tasks);
     console.log('PASS feature disposal late acquisition, bounded DELETE and retained client outcome');

@@ -3,10 +3,10 @@ const fs = require('node:fs');
 const { workPath } = require('./paths.cjs');
 const { pickInput, waitForSelectedPreviews, openImageAdd, openImageFolder, waitForInputPicker, waitForIdleInputWindow } = require('./image-picker-helpers.cjs');
 const { freshRecipe } = require('./recipe-helpers.cjs');
-const { addParameter, removeRecordedImage } = require('./variation-add-helpers.cjs');
+const { addParameter, removeRecordedImage, settledCount } = require('./variation-add-helpers.cjs');
 
 module.exports = async ({ cdp, FAKE, KZ, check }) => {
-  const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
+  const invoke = require('./variation-add-helpers.cjs').variationInvoker(cdp,KZ);
   const image = fs.readFileSync(workPath('tests/fixtures/flux-lora.png'));
   const capture = async name => {
     const shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
@@ -100,12 +100,14 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await cdp.poll("!!document.querySelector('[data-input-name=\"canny.png\"] .vz-image-same')");
     assert(await cdp.evaluate("document.querySelector('[data-input-name=\"canny.png\"]').getAttribute('aria-selected')==='true'&&document.querySelector('[data-input-name=\"canny.png\"] .vz-input-selected').textContent==='✓'"));
     await cdp.keyTrusted('Escape', { vk: 27 });
-    await cdp.evaluate(`(async()=>{const current=await(await fetch('/api/collections/fake/entries/canny.png/bytes?kind=input')).arrayBuffer();const other=await(await fetch('/api/collections/fake/entries/flux-lora.png/bytes')).arrayBuffer();window.__pickerAlternate=new File([other],'picked-upload.png',{type:'image/png'});const input=document.querySelector('.vz-imgfilespick'),data=new DataTransfer();data.items.add(new File([current],'same-current.png',{type:'image/png'}));data.items.add(window.__pickerAlternate);input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()`);
+    // Picker references contain flux-lora bytes. This File must really differ:
+    // filenames alone cannot make same-byte candidates distinct generation work.
+    await cdp.evaluate(`(async()=>{const current=await(await fetch('/api/collections/fake/entries/canny.png/bytes?kind=input')).arrayBuffer();const other=await(await fetch('/api/collections/fake/entries/flux-controlnet.png/bytes')).arrayBuffer();window.__pickerAlternate=new File([other],'picked-upload.png',{type:'image/png'});const input=document.querySelector('.vz-imgfilespick'),data=new DataTransfer();data.items.add(new File([current],'same-current.png',{type:'image/png'}));data.items.add(window.__pickerAlternate);input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()`);
     await cdp.poll("document.querySelectorAll('.vz-image-tile').length===4&&!document.querySelector('.vz-image-check')");
     assert.equal(await cdp.evaluate("document.querySelectorAll('.vz-image-tile .vz-image-same').length"), 2);
-    assert.equal(await cdp.evaluate("document.querySelector('.vz-count').textContent"), '2');
+    assert.equal(await settledCount(cdp), '2');
     await cdp.clickAt('.vz-image-tile[data-image-name="picked-upload.png"] .chrome-icon');
-    await cdp.poll("document.querySelectorAll('.vz-image-tile').length===3&&document.querySelector('.vz-count').textContent==='1'");
+    await settledCount(cdp, '1', { and: "document.querySelectorAll('.vz-image-tile').length===3" });
     await cdp.evaluate("(()=>{const input=document.querySelector('.vz-imgfilespick'),data=new DataTransfer();data.items.add(window.__pickerAlternate);input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()");
     await cdp.poll("document.querySelectorAll('.vz-image-tile').length===4&&!document.querySelector('.vz-image-check')");
     await capture('image-set-inputs-and-files');
@@ -119,7 +121,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     // A second run exercises the actual engine filesystem, not a mocked list.
     const folder = workPath('artifacts', 'engine-folder');
     fs.mkdirSync(folder + '/nested', { recursive: true });
-    fs.writeFileSync(folder + '/nested/turn-folder.png', image);
+    fs.writeFileSync(folder + '/nested/turn-folder.png', fs.readFileSync(workPath('tests/fixtures/flux-ipadapter.png')));
     fs.writeFileSync(folder + '/ignore.mp4', 'not an image');
     fs.writeFileSync(folder + '/same-current.png', Buffer.from(await cdp.evaluate("(async()=>Array.from(new Uint8Array(await(await fetch('/api/collections/fake/entries/canny.png/bytes?kind=input')).arrayBuffer())))()")));
     await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
@@ -127,7 +129,7 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await freshRecipe(cdp);await addParameter(cdp,'43.image');
     await removeRecordedImage(cdp,'43.image');
     await pickInput(cdp, 'picker-0550.png');
-    await cdp.evaluate(`(async()=>{const bytes=await(await fetch('/api/collections/fake/entries/flux-lora.png/bytes')).arrayBuffer();const input=document.querySelector('.vz-imgfilespick'),data=new DataTransfer();data.items.add(new File([bytes],'turn-browser.png',{type:'image/png'}));input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()`);
+    await cdp.evaluate(`(async()=>{const bytes=await(await fetch('/api/collections/fake/entries/flux-controlnet.png/bytes')).arrayBuffer();const input=document.querySelector('.vz-imgfilespick'),data=new DataTransfer();data.items.add(new File([bytes],'turn-browser.png',{type:'image/png'}));input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()`);
     const addFolder = async value => {
       await openImageFolder(cdp);
       await cdp.evaluate(`(()=>{const input=document.querySelector('.vz-folder-path');input.value=${JSON.stringify(value)};input.dispatchEvent(new Event('input',{bubbles:true}))})()`);
@@ -137,20 +139,24 @@ module.exports = async ({ cdp, FAKE, KZ, check }) => {
     await addFolder(folder);
     await cdp.poll("document.querySelectorAll('.vz-image-tile').length===4&&!document.querySelector('.vz-image-check')");
     assert.equal(await cdp.evaluate("document.querySelectorAll('.vz-image-same').length"), 1);
-    assert.equal(await cdp.evaluate("document.querySelector('.vz-count').textContent"), '3');
+    assert.equal(await settledCount(cdp), '3');
     await addFolder(folder); // same paths do not duplicate the set
     assert.equal(await cdp.evaluate("document.querySelectorAll('.vz-image-tile').length"), 4);
     await addFolder('relative');
     await cdp.poll("document.querySelector('.vz-folder [role=status]')?.textContent.includes('absolute')");
     assert.equal(await cdp.evaluate("document.querySelectorAll('.vz-image-tile').length"), 4);
+    // Row 184: an unreadable folder names itself and the all-or-nothing outcome.
+    await addFolder(folder + '/missing');
+    await cdp.poll(`document.querySelector('.vz-folder [role=status]')?.textContent===${JSON.stringify(`Could not import "${folder}/missing": cannot read "${folder}/missing" (not found). Nothing from this import was added. Check the engine-host path and permissions, or choose another folder.`)}`);
+    assert.equal(await cdp.evaluate("document.querySelectorAll('.vz-image-tile').length"), 4);
     await addFolder(folder);
     await cdp.clickAt('.vz-image-tile[data-image-name="turn-folder.png"] .chrome-icon');
-    await cdp.poll("document.querySelector('.vz-count').textContent==='2'");
+    await settledCount(cdp, '2');
     await addFolder(folder);
-    await cdp.poll("document.querySelector('.vz-count').textContent==='3'&&!document.querySelector('.vz-image-check')");
+    await settledCount(cdp, '3', { and: "!document.querySelector('.vz-image-check')" });
     await waitForSelectedPreviews(cdp);
     await openImageFolder(cdp);
-    const folderGeometry = await cdp.evaluate(`(()=>{const input=document.querySelector('.vz-folder-path').getBoundingClientRect(),add=document.querySelector('.vz-folder-add').getBoundingClientRect(),footer=document.querySelector('.vz-image-add').getBoundingClientRect(),grid=document.querySelector('.vz-image-grid').getBoundingClientRect();return {center:Math.abs((input.top+input.bottom-add.top-add.bottom)/2),chooserAbsent:!document.querySelector('.vz-folder-chooser'),order:input.right<=add.left&&grid.bottom<=footer.top,contained:input.left>=footer.left&&add.right<=footer.right}})()`);
+    const folderGeometry = await cdp.evaluate(`(()=>{const input=document.querySelector('.vz-folder-path').getBoundingClientRect(),add=document.querySelector('.vz-folder-add').getBoundingClientRect(),footer=document.querySelector('.vz-image-add').getBoundingClientRect(),grid=document.querySelector('.vz-image-grid').getBoundingClientRect();return {center:Math.abs((input.top+input.bottom-add.top-add.bottom)/2),chooserAbsent:!document.querySelector('.vz-folder-chooser'),order:input.right<=add.left&&footer.bottom<=grid.top,contained:input.left>=footer.left&&add.right<=footer.right}})()`);
     assert(folderGeometry.center < 1 && folderGeometry.chooserAbsent && folderGeometry.order && folderGeometry.contained, JSON.stringify(folderGeometry));
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
     try {

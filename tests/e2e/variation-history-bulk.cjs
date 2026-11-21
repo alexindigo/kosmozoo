@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
-const {addParameter}=require('./variation-add-helpers.cjs');
+const {addParameter,settledCount}=require('./variation-add-helpers.cjs');
 module.exports=async({page,evaluate,invoke,list,write,FAKE,E})=>{
   const graph=(denoise,steps)=>({43:{class_type:'LoadImage',inputs:{image:'canny.png'}},9:{class_type:'BasicScheduler',inputs:{denoise,steps,image:['43',0]}},66:{class_type:'SaveImage',inputs:{images:['9',0],filename_prefix:'bulk'}}});
   const published=await fetch(FAKE+'/__test/activity',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({captureEnqueue:true,publish:[{name:'bulk-a.png',fixture:'flux-basic.png',width:80,height:60,graph:graph(.5,20)},{name:'bulk-b.png',fixture:'flux-basic.png',width:80,height:60,graph:graph(.8,25)}]})});assert(published.ok);
@@ -13,11 +13,11 @@ module.exports=async({page,evaluate,invoke,list,write,FAKE,E})=>{
   await page.clickAt('[data-param-key="9.steps"] .mode-switch button[title="Value"]');
   await write('[data-param-key="9.steps"] .vz-value-field input','30');
   await page.clickAt('[data-image-id="43.image"] [data-image-kind="reference"] .vz-image-remove button');
-  await page.clickAt('[data-image-id="43.image"] .vz-image-plus');
   await page.clickAt('[data-image-id="43.image"] .vz-current-image');
+  await settledCount(page, '6');
   await page.clickAt('.vz-run');
-  await page.poll('document.querySelector(".vz-queued")?.textContent==="Queued 6 of 6 jobs"||!!document.querySelector(".vz-error")?.textContent',45000);
-  assert.equal(await page.evaluate('document.querySelector(".vz-queued")?.textContent'),'Queued 6 of 6 jobs',await page.evaluate('document.querySelector(".vz-error").textContent'));
+  await page.poll('document.querySelector(".vz-queued")?.textContent==="6 confirmed, 0 partial, 0 unknown, 0 unsent; 6 sent."||!!document.querySelector(".vz-error")?.textContent',45000);
+  assert.equal(await page.evaluate('document.querySelector(".vz-queued")?.textContent'),'6 confirmed, 0 partial, 0 unknown, 0 unsent; 6 sent.',await page.evaluate('document.querySelector(".vz-error").textContent'));
   const rows=(await list()).items;assert.equal(rows.length,1);assert.equal(rows[0].summary.total,6);
   const jobs=await(await fetch(FAKE+'/__test/enqueues')).json();assert.equal(jobs.length,6);
   const first=jobs.filter(job=>job.prompt['43'].inputs.image==='bulk-a.png [output]'),second=jobs.filter(job=>job.prompt['43'].inputs.image==='bulk-b.png [output]');

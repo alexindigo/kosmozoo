@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
 const { pickInput } = require('./image-picker-helpers.cjs');
-const { addParameter, removeRecordedImage } = require('./variation-add-helpers.cjs');
+const { addParameter, removeRecordedImage, settledCount } = require('./variation-add-helpers.cjs');
 const ENGINE = process.env.E2E_ENGINE || 'http://127.0.0.1:18460';
 const FAKE = process.env.E2E_FAKE || 'http://127.0.0.1:18461';
 const KZ = `(await import('/store/instance.js')).appStore`;
@@ -61,7 +61,7 @@ async function main() {
     await cdp.keyTrusted('Tab', { vk: 9 });
     assert.equal(await cdp.evaluate(`Number(document.querySelector('${denoise} .vz-range-field:first-child input').value)`), .85);
     await type(`${denoise} .vz-row-inc-input`, '1e');
-    await cdp.poll("document.querySelector('.vz-count').textContent==='—'");
+    await settledCount(cdp, '--');
     assert(await cdp.evaluate(`document.querySelector('${denoise} .vz-row-inc-input').getAttribute('aria-invalid')==='true'`));
     assert(await cdp.evaluate("document.querySelector('.vz-messages').textContent.includes('Step')"));
     await shot('invalid-step'); await type(`${denoise} .vz-row-inc-input`, '.05');
@@ -87,8 +87,8 @@ async function main() {
     await addParameter(cdp, '43.image');
     await removeRecordedImage(cdp, '43.image');
     for (const name of ['canny.png', 'ref.png', 'third.png']) await pickInput(cdp, name);
-    await cdp.poll("document.querySelector('.vz-count').textContent==='11'");
-    assert(await cdp.evaluate("document.querySelector('.vz-count-sub').textContent.includes('3 input images × 4 denoise values · 1 unchanged combination excluded')"));
+    await settledCount(cdp, '11');
+    assert(await cdp.evaluate("(()=>{const text=document.querySelector('.vz-count-sub').textContent;return text.includes('12 distinct combinations')&&text.includes('1 unchanged excluded')&&text.includes('11 admitted jobs')})()"));
     assert(await cdp.evaluate("document.querySelector('.vz-folder-path').labels[0].textContent==='Folder on the engine computer'"));
     assert(await cdp.evaluate("document.querySelector('.vz-folder-path').title.includes('per folder import')"));
     await type('.vz-prefix', 'study_'); await type('.vz-suffix', '_{9.denoise}');
@@ -102,28 +102,28 @@ async function main() {
     await shot('populated');
 
     await addParameter(cdp, '9.scheduler');
-    assert(await cdp.evaluate("!!document.querySelector('[data-enum-id=\"9.scheduler\"] .vz-enum-current')&&!document.querySelector('[data-enum-id=\"9.scheduler\"]').textContent.includes('Current')"));
+    assert(await cdp.evaluate("!!document.querySelector('[data-enum-id=\"9.scheduler\"] .vz-parameter-current')&&!document.querySelector('[data-enum-id=\"9.scheduler\"]').textContent.includes('Current')"));
     await addParameter(cdp, '2.text');
     await type('[data-text-id="2.text"] .vz-text-values', 'A portrait of {{subject}}.\nLine breaks stay.');
-    await cdp.poll("document.querySelector('.vz-count').textContent==='—'");
+    await settledCount(cdp, '--');
     assert(await cdp.evaluate("document.querySelector('.vz-tpl-input').getAttribute('aria-invalid')==='true'"));
     await type('.vz-tpl-input', 'a person; a cat');
-    await cdp.poll("document.querySelector('.vz-count').textContent==='24'");
+    await settledCount(cdp, '24');
     await shot('text-and-enum');
     await cdp.clickAt('[data-text-id="2.text"] .vz-parameter-remove');
     await cdp.clickAt('[data-enum-id="9.scheduler"] .vz-parameter-remove');
-    await cdp.poll("document.querySelector('.vz-count').textContent==='11'");
+    await settledCount(cdp, '11');
     console.log('PASS current enum semantics and persistent template syntax/invalid-value associations');
 
     await cdp.evaluate(`(()=>{const original=window.fetch;window.__uiRelease=null;window.__uiRestore=()=>window.fetch=original;
       window.fetch=(url,options)=>{const response=original(url,options);return String(url).includes('/inspect-image/')?response.then(r=>new Promise(resolve=>window.__uiRelease=()=>resolve(r))):response}})()`);
     await cdp.evaluate(`(async()=>{const bytes=await(await fetch('/api/collections/fake/entries/flux-lora.png/bytes')).arrayBuffer(),input=document.querySelector('.vz-imgfilespick'),data=new DataTransfer();data.items.add(new File([bytes],'checking.png',{type:'image/png'}));input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}))})()`);
     await cdp.poll("typeof window.__uiRelease==='function'");
-    assert(await cdp.evaluate("document.querySelector('.vz-right').textContent.includes('Checking images…')&&document.querySelector('.vz-count-group').textContent.includes('Estimated variations')"));
+    assert(await cdp.evaluate("document.querySelector('.vz-right').textContent.includes('Checking bytes for')&&document.querySelector('.vz-count').getAttribute('aria-busy')==='true'&&document.querySelector('.vz-run').disabled"));
     await shot('checking'); await cdp.evaluate('window.__uiRelease();window.__uiRestore()');
     await cdp.poll("!document.querySelector('.vz-image-check')");
     await cdp.clickAt('[data-image-name="checking.png"] button[aria-label="Remove checking.png"]');
-    await cdp.poll("document.querySelector('.vz-count').textContent==='11'");
+    await settledCount(cdp, '11');
     console.log('PASS checking evidence is visibly provisional without discarding the image set');
 
     for (const [width, height] of [[1280,900], [768,900], [500,900], [800,461]]) {
@@ -131,14 +131,15 @@ async function main() {
       if (height === 461) {
         const suffix = await cdp.evaluate("document.querySelector('.vz-suffix').value");
         await type('.vz-suffix', suffix + '{missing}'); await cdp.clickAt('.vz-run');
-        await cdp.poll("document.querySelector('.vz-error').textContent.includes('naming token')");
+        await cdp.poll("document.querySelector('.vz-messages').textContent.includes('token')&&document.querySelector('.vz-run').disabled");
         await type('.vz-suffix', suffix);
         await cdp.evaluate(`(()=>{window.__sidebarFetch=window.fetch;window.fetch=(url,options)=>String(url).includes('/features/variations/run')
           ?Promise.resolve(new Response(JSON.stringify({error:'A long engine explanation. '.repeat(100)}),{status:400}))
           :window.__sidebarFetch(url,options)})()`);
         try {
+          await settledCount(cdp, '11');
           await cdp.clickAt('.vz-run');
-          await cdp.poll("document.querySelector('.vz-error').textContent.length>2000");
+          await cdp.poll("document.querySelector('.vz-error')?.textContent.length>2000");
         } finally { await cdp.evaluate('window.fetch=window.__sidebarFetch'); }
       }
       await cdp.evaluate('document.querySelector(".vz-run").blur();document.querySelector(".vz-run").focus()');
@@ -162,7 +163,8 @@ async function main() {
       if(height === 461) {
         assert(geometry.bodyScroll > 0, 'short-window sidebar owns a real body scroller');
         assert(geometry.message.height > 0, 'message remains above the pinned action');
-        assert(geometry.message.height <= geometry.side.height*.4+1 && geometry.messageScroll > 0, 'long result has bounded owned overflow');
+        assert(geometry.message.height <= 3*16+1, 'long result retains the fixed three-line slot');
+        assert(await cdp.evaluate(`(()=>{const e=document.querySelector('.vz-message-content');return getComputedStyle(e).webkitLineClamp==='3'&&e.parentElement.title.length>2000&&e.textContent.length>2000&&e.scrollHeight>e.clientHeight})()`), 'clamped result retains its full text and title');
         assert(await cdp.evaluate(`(()=>{const body=document.querySelector('.vz-sidebar-body');body.scrollTop=0;const a=body.getBoundingClientRect(),b=body.querySelector('.vz-count').getBoundingClientRect();return b.top>=a.top&&b.bottom<=a.bottom})()`));
         assert(await cdp.evaluate(`(()=>{const body=document.querySelector('.vz-sidebar-body');body.scrollTop=body.scrollHeight;const a=body.getBoundingClientRect(),b=body.querySelector('.vz-suffix').getBoundingClientRect();return b.top>=a.top&&b.bottom<=a.bottom})()`));
       }
@@ -175,8 +177,9 @@ async function main() {
     }
     await cdp.send('Emulation.clearDeviceMetricsOverride');
     const capture = await fetch(FAKE + '/__test/activity', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ captureEnqueue: true }) }); assert(capture.ok);
+    await settledCount(cdp, '11');
     await cdp.clickAt('.vz-run');
-    await cdp.poll("document.querySelector('.vz-queued')?.textContent==='Queued 11 of 11 jobs'", 20000);
+    await cdp.poll("document.querySelector('.vz-queued')?.textContent==='11 confirmed, 0 partial, 0 unknown, 0 unsent; 11 sent.'", 20000);
     const jobs = await (await fetch(FAKE + '/__test/enqueues')).json();
     assert.equal(jobs.length, 11);
     const tuples = jobs.map(job => [job.prompt['43'].inputs.image, job.prompt['9'].inputs.denoise]);
@@ -197,14 +200,15 @@ async function main() {
     await cdp.evaluate(`(async()=>{await fetch('/api/collections/fake/entries/summary-large.png/bytes');return ${KZ}.handles.invoke('variations.open',{id:'fake:summary-large.png'})})()`);
     for (const key of ['a','b','c']) await addParameter(cdp, `91.${key}`);
     await cdp.poll("document.querySelectorAll('.vz-slider-row').length===3");
-    await cdp.poll("document.querySelector('.vz-count').title.includes('(estimate)')");
-    assert(await cdp.evaluate("document.querySelector('.vz-count').textContent.includes('10^')&&document.querySelector('.vz-messages').textContent.includes('precision')"));
-    assert.equal(await cdp.evaluate("document.querySelector('.vz-run').disabled"), false);
+    const estimate = await settledCount(cdp);
+    assert(estimate.length>0&&estimate.length<45);
+    assert(await cdp.evaluate("/limit|maximum|safe|precision/i.test(document.querySelector('.vz-messages').textContent)"));
+    assert.equal(await cdp.evaluate("document.querySelector('.vz-run').disabled"), true);
     await shot('large-count');
     await cdp.clickAt('.vz-close'); await cdp.poll("!!document.querySelector('.vz-discard')"); await cdp.clickAt('.vz-discard-confirm');
     await cdp.poll("!document.querySelector('.vz-panel')");
     assert.equal((await (await fetch(FAKE + '/__test/enqueues')).json()).length, 11);
-    console.log('PASS large count has bounded notation, full approximate value and precision explanation without a new action limit');
+    console.log('PASS large count retains bounded presentation and the existing per-image Run limit');
 
     await cdp.goto(ENGINE + '/#fake#flux-controlnet.png');
     await cdp.poll("!!document.querySelector('.boxcol textarea.neg')&&!!document.querySelector('.infogroup-head')", 20000);

@@ -30,8 +30,8 @@ Deno.test("identity: every kind has unique own-node axes, independent mutation a
     assertEquals(mutated.writes, [{ id: p.id, nodeId, key: p.key, value }]);
     const expected = structuredClone(graph); expected[nodeId].inputs[p.key] = value;
     assertEquals(mutated.graph, expected);
-    assertEquals(shared.templateReplaceWithProof(`_{${p.id}}`, { [p.id]: value }, {}),
-      { text: `_${value}`, complete: true });
+    assertEquals(shared.templateReplaceWithProof(`_{${p.id}}`, { [p.id]: value }, {}, {}, params),
+      { text: `_${p.kind === "text" ? shared.textName(value) : value}`, complete: true });
   }
 });
 
@@ -39,7 +39,7 @@ Deno.test("identity: codec handles nested IDs and delimiter-bearing names withou
   for (const [nodeId, input] of [["92:105", "image"], ["node.with.dot", "input.name"], ["a{b}", "input space"]]) {
     const id = shared.paramId(nodeId, input);
     assertEquals(shared.parseParamId(id), { nodeId, input });
-    assertEquals(shared.templateReplaceWithProof(`{${id}}`, { [id]: "own" }, {}), { text: "own", complete: true });
+    assertEquals(shared.templateReplaceWithProof(`{${id}}`, { [id]: "own" }, {}), { text: "own~5b3975", complete: true });
   }
   assert(shared.paramId("a.b", "c") !== shared.paramId("a", "b.c"));
   assertEquals(shared.parseParamId("not-an-id"), null);
@@ -68,8 +68,9 @@ Deno.test("identity: catalogue resolution and duplicate IDs fail before editor s
   const origin = { source: "fake", address: "fake:8188", kind: "comfy", incarnation: "instance" };
   const editor = makeVariationEditor({ targets: [{ id: "fake:a.png", host: "fake", filename: "a.png", origin }],
     services: {}, currentOrigin: () => origin });
-  assertThrows(() => editor.installCatalogue({ context: { origin, graphHash: "a".repeat(64) },
-    params: [p, p], stringParams: [], enumParams: [], textParams: [] }), Error, "Duplicate");
+  assertEquals(editor.installCatalogue({ context: { origin, graphHash: "a".repeat(64) },
+    params: [p, p], stringParams: [], enumParams: [], textParams: [] }), false);
+  assert(editor.preview().message.includes("Duplicate"));
   assertEquals(editor.rows("numeric"), {});
   assertEquals(editor.ready(), false);
   editor.dispose();
@@ -79,8 +80,8 @@ Deno.test("identity: legacy naming aliases always select the first carrier, incl
   const params = descriptors(), values = Object.fromEntries(params.map(p => [p.id, p.current]));
   const aliases = shared.parameterAliases(params);
   assertEquals(shared.templateReplaceWithProof('{LoadImage.image}|{image}|{81.image}|{LoraLoader.strength_model}|{Same}',
-    { '81.image': 'second.png', '21.strength_model': .2, '92:106.text': 'changed negative' }, values, aliases),
-  { text: 'content.png|content.png|second.png|0.8|positive', complete: true });
+    { '81.image': 'second.png', '21.strength_model': .2, '92:106.text': 'changed negative' }, values, aliases, params),
+  { text: 'content|content|second|0.8|positive~afa6e9', complete: true });
   for (const token of ['{unknown#id.image}', '{unknown space}', '{}', '{{76.image}}', '{76.image', '76.image}']) {
     assertEquals(shared.templateReplaceWithProof(token, {}, {}).complete, false);
   }
@@ -105,7 +106,8 @@ Deno.test("identity: equal image values/titles never merge rows or their native 
   assert(editor.rows('images')['81.image'].items[1].file === second);
   assertEquals(editor.rows('images')['76.image'].label, 'Reference #76 · image');
   assertEquals(editor.rows('images')['81.image'].label, 'Reference #81 · image');
-  assertThrows(() => editor.installCatalogue({ ...data, textParams: [...data.textParams, data.params[0]] }), Error, 'Duplicate');
+  assertEquals(editor.installCatalogue({ ...data, textParams: [...data.textParams, data.params[0]] }), false);
+  assert(editor.preview().message.includes('Duplicate'));
   assert(editor.rows('images')['76.image'].items[1].file === first);
   editor.dispose();
 });

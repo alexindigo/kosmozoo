@@ -7,6 +7,7 @@
 
 const PATHS = {
   "chevron-down": `<path d="M6 9l6 6 6-6" />`,
+  "check": `<path d="M5 12l4 4L19 6" />`,
   "history": `<path d="M4.5 7.5a9 9 0 1 1-1.5 7.5M1.5 3v6h6M12 6v6l4.5 3" />`,
   "minus": `<path d="M5 12h14" />`,
   "face-scan": `<path d="M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5M8 10h.01M16 10h.01M9 15a4 4 0 0 0 6 0" />`,
@@ -114,6 +115,18 @@ const PATHS = {
   <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2" />
   <path d="M7 11l5 5l5 -5" />
   <path d="M12 4l0 12" />`,
+  "rotate-clockwise-2": `<path d="M9 4.55a8 8 0 0 1 6 14.9m0 -4.45v5h5" />
+  <path d="M5.63 7.16l0 .01" />
+  <path d="M4.06 11l0 .01" />
+  <path d="M4.63 15.1l0 .01" />
+  <path d="M7.16 18.37l0 .01" />
+  <path d="M11 19.94l0 .01" />`,
+  "rotate-2": `<path d="M15 4.55a8 8 0 0 0 -6 14.9m0 -4.45v5h-5" />
+  <path d="M18.37 7.16l0 .01" />
+  <path d="M13 19.94l0 .01" />
+  <path d="M16.84 18.37l0 .01" />
+  <path d="M19.37 15.1l0 .01" />
+  <path d="M19.94 11l0 .01" />`,
 };
 
 export function iconSvg(name, size = 14) {

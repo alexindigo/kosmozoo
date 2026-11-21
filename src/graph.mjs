@@ -75,14 +75,15 @@ function compatibleTypes(source, destination) {
 }
 
 export function validateGraphLinks(graph, schema = {}) {
+  const issue = (message, context) => Object.assign(new Error(message), { issue: context });
   for (const [id, node] of Object.entries(graph)) {
     for (const [key, link] of linkInputs(node)) {
-      if (!Object.hasOwn(graph, link[0])) throw new Error(`Dangling ComfyUI link: ${id}.${key} references missing node ${link[0]}`);
+      if (!Object.hasOwn(graph, link[0])) throw issue(`Dangling ComfyUI link: ${id}.${key} references missing node ${link[0]}`, { id, key, node: link[0], slot: link[1] });
       const ports = schema.outputs?.get(String(graph[link[0]].class_type ?? ""));
-      if (ports && link[1] >= ports.length) throw new Error(`Invalid output slot: ${id}.${key} references ${link[0]} slot ${link[1]}`);
+      if (ports && link[1] >= ports.length) throw issue(`Invalid output slot: ${id}.${key} references ${link[0]} slot ${link[1]}`, { id, key, node: link[0], slot: link[1], numbers: { outputs: ports.length } });
       const declaration = inputDeclaration(node, key, schema);
       if (ports && declaration && compatibleTypes(ports[link[1]]?.type, declaration.type) === false) {
-        throw new Error(`Incompatible link type: ${id}.${key} expects ${declaration.type}, received ${ports[link[1]].type}`);
+        throw issue(`Incompatible link type: ${id}.${key} expects ${declaration.type}, received ${ports[link[1]].type}`, { id, key, node: link[0], slot: link[1], expected: declaration.type, actual: ports[link[1]].type });
       }
     }
   }
@@ -92,7 +93,7 @@ export function validateGraphLinks(graph, schema = {}) {
   for (const [id, node] of Object.entries(graph)) for (const [key, value] of Object.entries(node?.inputs ?? {})) {
     if (Array.isArray(value) && value.length === 2 && (typeof value[0] === "string" || Number.isSafeInteger(value[0])) &&
         typeof value[1] === "number" && !isGraphLink(value)) {
-      throw new Error(`Unresolved ComfyUI array: ${id}.${key}; invalid numeric output slot`);
+      throw issue(`Unresolved ComfyUI array: ${id}.${key}; invalid numeric output slot`, { id, key, node: value[0], slot: value[1] });
     }
   }
 }

@@ -27,7 +27,8 @@ async function run(page, { nativeViewport = false, captureFull } = {}) {
     await captureFull?.(name, value);
     return value;
   };
-  const other = new URL(FAKE); other.port=String(Number(other.port)+1);
+  const other = new URL(process.env.E2E_FAKE2 ?? FAKE);
+  if (!process.env.E2E_FAKE2) other.port=String(Number(other.port)+1);
   const control=async body=>{const r=await fetch(other.origin+'/__test/activity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});assert.equal(r.status,200);await r.json();};
   const owned = require('./owned-fixtures.cjs').fakeFixtures(other.origin, control);
   const reveal=async name=>{

@@ -6,6 +6,7 @@ import { SingleLineText } from "../../components/SingleLineText.js";
 import { isFileDrag, droppedFiles } from "./image-drop.js";
 import { Thumbnail } from "./Thumbnail.js";
 import { ValuePreview } from "../../components/ValuePreview.js";
+import { ProblemFeedback } from "./ProblemFeedback.js";
 
 export function ParameterCatalogue(props) {
   const ids = createMemo(() => props.sections.flatMap(section => section.nodes.flatMap(node => node.ids)));
@@ -40,6 +41,7 @@ function CatalogueRow(props) {
             surface={picture => <div class="vz-thumbnail-surface" role="img" aria-label={parameterContext(row())}>{picture}</div>} />
         </div>
       </Show></Show>
+      <ProblemFeedback problems={row().problems ?? []} />
     </div>
     <IconButton buttonRef={element => add = element} chrome size="sm" variant="plain vz-catalogue-add" title={`Add ${row().label}`}
       onAction={props.onAdd} icon={iconSvg("plus")} />

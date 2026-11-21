@@ -2,13 +2,13 @@
 // over HTTP. One timeout for every fetch; every fetch checks r.ok.
 
 import { RENDERABLE, IMAGE_EXTENSIONS, EXT_MIME } from "./mime.mjs";
-import { assertSafeName } from "./folder.mjs";
-import { isEntryPath, splitEntryPath, inventoryFolders } from "../entry-path.mjs";
+import { isEntryPath, isEntryLeaf, splitEntryPath } from "../entry-path.mjs";
 import { makeInventoryOwner } from "./inventory-owner.mjs";
 import { makeMetadataCollector, interpretHeaders } from "./comfy-metadata.mjs";
 import { makeGenerationTimes } from "./comfy-generation.mjs";
 import { InventoryError, bounded, cancelled } from "./inventory.mjs";
 import { cloneJsonValue, parseExactJson, stringifyExactJson } from "../parameters.mjs";
+import { makePromptLane, promptRequest } from "./comfy-submission.mjs";
 
 const HOST_TIMEOUT_MS = 10_000;
 
@@ -41,16 +41,11 @@ export function parseListingEntry(n) {
   if (!text.endsWith("]")) return plain;
   // Locate the rightmost eligible opening bracket without repartitioning a
   // whitespace run. The old greedy prefix retains all but one separator char.
-  const line = text.search(/[\r\n\u2028\u2029]/);
-  let whitespaceEnd = line;
-  if (line >= 0) while (whitespaceEnd < text.length && /\s/.test(text[whitespaceEnd])) whitespaceEnd++;
   for (let at = text.length - 2; at > 0; at--) {
     if (text[at] === "]") break;
     if (text[at] !== "[" || !/\s/.test(text[at - 1])) continue;
-    if (line >= 0 && at > whitespaceEnd) continue;
-    const end = line >= 0 && line < at ? line : at - 1;
     const annotation = text.slice(at + 1, -1);
-    return { name: text.slice(0, end), size: /^\d+$/.test(annotation) ? Number(annotation) : null };
+    return { name: text.slice(0, at - 1), size: /^\d+$/.test(annotation) ? Number(annotation) : null };
   }
   return plain;
 }
@@ -63,9 +58,8 @@ export async function list(addr, kind = "output", options = {}) {
   if (!r.ok) throw new Error(`ComfyUI listing: ${r.status}`); // E8: a down host is not an empty dir
   const raw = await r.json();
   if (kind === "input") {
-    return raw
-      .map((n) => parseListingEntry(n).name)
-      .filter((n) => IMAGE_EXTENSIONS.has(n.split(".").pop().toLowerCase()) && assertSafeName(n));
+    return normalizeRootInventory(raw).items.map(item => item.name)
+      .filter((n) => IMAGE_EXTENSIONS.has(n.split(".").pop().toLowerCase()));
   }
   return raw.map(parseListingEntry);
 }
@@ -150,22 +144,22 @@ export async function read(addr, name, kind = "output", { range, idleMs = HOST_T
 // The engine's input route forwards backing conflicts; use the returned name,
 // never invent successful upload provenance from the requested filename.
 export async function write(addr, name, bytes, { fetcher = fetch } = {}) {
-  if (!validName(name) || !assertSafeName(name)) return { ok: false, status: 400, error: "bad filename" };
+  if (!isEntryLeaf(name)) return { ok: false, status: 400, error: "bad filename", failure: { kind: "filename", name } };
   const form = new FormData();
   form.append("image", new Blob([bytes]), name);
   try {
     const r = await fetcher(`http://${addr}/api/upload/image`, {
       method: "POST", body: form, signal: AbortSignal.timeout(HOST_TIMEOUT_MS),
     });
-    if (!r.ok) return { ok: false, status: r.status, error: `ComfyUI ${r.status}` };
+    if (!r.ok) { const reason = await r.text(); return { ok: false, status: r.status, error: `ComfyUI ${r.status}`, failure: { kind: "rejected", status: r.status, reason } }; }
     const d = await r.json().catch(() => null);
-    if (!d || typeof d.name !== "string" || !validName(d.name) || !assertSafeName(d.name) ||
+    if (!d || !isEntryLeaf(d.name) ||
         (d.type !== undefined && d.type !== "input") || (d.subfolder !== undefined && d.subfolder !== "")) {
-      return { ok: false, status: 502, error: "upload acceptance is unconfirmed: invalid returned input name; do not automatically retry" };
+      return { ok: false, status: 502, error: "upload acceptance is unconfirmed: invalid returned input name; do not automatically retry", failure: { kind: "receipt", reason: "invalid returned input name/type/subfolder or JSON" } };
     }
     return { ok: true, name: d.name };
   } catch (e) {
-    return { ok: false, status: 502, error: `upload failed: ${e.message}` };
+    return { ok: false, status: 502, error: `upload failed: ${e.message}`, failure: { kind: "transport", reason: e.message } };
   }
 }
 
@@ -273,39 +267,57 @@ const OBJECT_INFO_TTL_MS = 60_000;
 // Filesystem inventory is independent of retained prompt history and delete
 // preferences. The pinned AssetsPlus handler treats limit=0 as an unsliced
 // scan and negative scan_depth as unlimited depth.
-export function normalizeInventory(payload) {
+// One per-record acceptance boundary for both upstream listing shapes. Never
+// select arbitrary metadata for an ambiguous identity. Counts refer to records;
+// identical duplicates are harmless, contradictory occurrences are all omitted.
+function listingRecords(raw, decode) {
+  const entries = new Map(), counts = new Map(), conflicts = new Set(), reasons = new Map();
+  const skip = (reason, count = 1) => reasons.set(reason, (reasons.get(reason) ?? 0) + count);
+  for (const record of raw) {
+    const { item, reason } = decode(record);
+    if (reason) { skip(reason); continue; }
+    if (!item) continue; // Non-media files are not output candidates.
+    if (conflicts.has(item.name)) { skip("conflicting duplicate"); continue; }
+    const prior = entries.get(item.name), count = counts.get(item.name) ?? 0;
+    if (prior && (prior.size !== item.size || prior.mtime !== item.mtime)) {
+      entries.delete(item.name); conflicts.add(item.name); skip("conflicting duplicate", count + 1);
+    } else { entries.set(item.name, item); counts.set(item.name, count + 1); }
+  }
+  return { items: [...entries.values()], skipped: { count: [...reasons.values()].reduce((sum, n) => sum + n, 0),
+    reasons: [...reasons].map(([reason, count]) => ({ reason, count })) } };
+}
+
+function mergeSkipped(...values) {
+  const reasons = new Map();
+  for (const value of values) for (const item of value.reasons) reasons.set(item.reason, (reasons.get(item.reason) ?? 0) + item.count);
+  return { count: values.reduce((sum, value) => sum + value.count, 0), reasons: [...reasons].map(([reason, count]) => ({ reason, count })) };
+}
+
+export function normalizeInventory(payload, { descendants = false } = {}) {
   if (!payload || !Array.isArray(payload.items) || payload.has_more !== false ||
       typeof payload.cursor !== "string" || !Number.isFinite(payload.latest_mtime)) {
     throw new Error("ComfyUI inventory: malformed or incomplete scan");
   }
-  const entries = new Map();
-  for (const item of payload.items) {
-    if (!item || !validName(item.relpath) || !RENDERABLE.has(item.relpath.split(".").pop().toLowerCase()) ||
-        !Number.isSafeInteger(item.size) || item.size < 0 || !Number.isFinite(item.mtime)) {
-      throw new Error("ComfyUI inventory: invalid record");
-    }
-    const next = { name: item.relpath, size: item.size, mtime: item.mtime };
-    const prior = entries.get(next.name);
-    if (prior && (prior.size !== next.size || prior.mtime !== next.mtime)) {
-      throw new Error("ComfyUI inventory: conflicting duplicate");
-    }
-    entries.set(next.name, next);
-  }
-  return [...entries.values()];
+  return listingRecords(payload.items, item => {
+    if (!item || !validName(item.relpath)) return { reason: "invalid relative path" };
+    if (descendants && !item.relpath.includes("/")) return { reason: "unexpected root record in descendant listing" };
+    if (!RENDERABLE.has(item.relpath.split(".").pop().toLowerCase())) return { reason: "not a media file" };
+    if (!Number.isSafeInteger(item.size) || item.size < 0) return { reason: "invalid file size" };
+    if (!Number.isFinite(item.mtime)) return { reason: "invalid modification time" };
+    return { item: { name: item.relpath, size: item.size, mtime: item.mtime } };
+  });
 }
 
 export function normalizeRootInventory(raw) {
-  if (!Array.isArray(raw) || raw.some((name) => typeof name !== "string")) throw new Error("ComfyUI listing: invalid array");
-  const entries = new Map();
-  for (const item of raw.map(parseListingEntry)) {
-    if (!validName(item.name) || item.name.includes("/")) throw new Error("ComfyUI root listing: invalid name");
-    if (!RENDERABLE.has(item.name.split(".").pop().toLowerCase())) continue;
-    if (item.size !== null && (!Number.isSafeInteger(item.size) || item.size < 0)) throw new Error("ComfyUI root listing: invalid size");
-    const prior = entries.get(item.name);
-    if (prior && prior.size !== item.size) throw new Error("ComfyUI root listing: conflicting duplicate");
-    entries.set(item.name, item);
-  }
-  return [...entries.values()];
+  if (!Array.isArray(raw)) throw new Error("ComfyUI listing: invalid array");
+  return listingRecords(raw, value => {
+    if (typeof value !== "string") return { reason: "invalid listing record" };
+    const item = parseListingEntry(value);
+    if (!validName(item.name) || item.name.includes("/")) return { reason: "invalid relative path" };
+    if (!RENDERABLE.has(item.name.split(".").pop().toLowerCase())) return {};
+    if (item.size !== null && (!Number.isSafeInteger(item.size) || item.size < 0)) return { reason: "invalid file size" };
+    return { item };
+  });
 }
 
 export async function inventory(addr, { client, ...options } = {}) {
@@ -323,8 +335,8 @@ const MAX_SCHEMA_DEPTH = 32;
 const MAX_SCHEMA_ENTRIES = 100_000;
 function schemaBudget() {
   let remaining = MAX_SCHEMA_ENTRIES;
-  return { take(count = 1) {
-    if (count > remaining) throw new RangeError("ComfyUI object_info expansion budget exceeded");
+  return { path: "object_info", take(count = 1) {
+    if (count > remaining) throw Object.assign(new RangeError("ComfyUI object_info expansion budget exceeded"), { schemaIssue: { code: "schema-budget", path: this.path, numbers: { limit: MAX_SCHEMA_ENTRIES, requested: MAX_SCHEMA_ENTRIES - remaining + count } } });
     remaining -= count;
   }, set(map, key, value) { this.take(); map.set(key, value); } };
 }
@@ -363,18 +375,20 @@ function autogrowChildren(template) {
 }
 
 function inputSchema(input, prefix, budget, depth = 0) {
-  if (depth > MAX_SCHEMA_DEPTH) throw new RangeError("ComfyUI object_info nesting budget exceeded");
-  const schema = { types: new Map(), enums: new Map(), declarations: new Map(), dynamicCombos: new Map(), defaults: new Map(), lazy: new Set() };
+  if (depth > MAX_SCHEMA_DEPTH) throw Object.assign(new RangeError("ComfyUI object_info nesting budget exceeded"), { schemaIssue: { code: "schema-depth", path: prefix, numbers: { limit: MAX_SCHEMA_DEPTH, depth } } });
+  const schema = { types: new Map(), enums: new Map(), declarations: new Map(), dynamicCombos: new Map(), defaults: new Map(), lazy: new Set(), warnings: [] };
   // Child prompt keys share this prefix, so their declarations, lazy flags and
   // nested dynamic combo branches (each owning its own defaults) join the parent
   // whole. Child defaults stay unmerged: group rows, autogrow names and slot
   // children exist only when present upstream, so no absent value is created.
   const adopt = child => {
+    schema.warnings.push(...child.warnings);
     for (const channel of ["types", "enums", "declarations", "dynamicCombos"]) for (const [key, value] of child[channel]) budget.set(schema[channel], key, value);
     for (const key of child.lazy) { budget.take(); schema.lazy.add(key); }
   };
   for (const section of ["required", "optional"]) {
     for (const [key, spec] of Object.entries(input?.[section] ?? {})) {
+      budget.path = `${prefix}.${key}`;
       budget.take();
       const name = `${prefix}.${key}`, t = Array.isArray(spec) ? spec[0] : spec;
       const config = Array.isArray(spec) ? spec[1] : null;
@@ -387,13 +401,15 @@ function inputSchema(input, prefix, budget, depth = 0) {
       budget.set(schema.declarations, name, declaration);
       if (t === "COMFY_DYNAMICGROUP_V3" && config?.template) {
         const max = config.max ?? 20;
-        if (!Number.isSafeInteger(max) || max < 1 || max > 20) throw new Error("Invalid dynamic group bounds");
+        if (!Number.isSafeInteger(max) || max < 1 || max > 20) throw Object.assign(new Error("Invalid dynamic group bounds"), { schemaIssue: { code: "schema-group", path: name, value: max, numbers: { limit: 20 } } });
         for (let index = 0; index < max; index++) {
           adopt(inputSchema(config.template, `${name}.${index}`, budget, depth + 1));
         }
       }
       if (t === "COMFY_AUTOGROW_V3") {
         const children = autogrowChildren(config?.template);
+        if (!children) schema.warnings.push({ input: name, detail: "invalid autogrow template" });
+        else if (config?.template?.names?.length > MAX_AUTOGROW_NAMES) schema.warnings.push({ input: name, detail: `${config.template.names.length} declared names with only ${MAX_AUTOGROW_NAMES} supported` });
         if (children) {
           budget.take(children.length);
           for (const [child, childSection, childSpec] of children) adopt(inputSchema({ [childSection]: { [child]: childSpec } }, name, budget, depth + 1));
@@ -410,6 +426,8 @@ function inputSchema(input, prefix, budget, depth = 0) {
       if (t === "COMFY_DYNAMICCOMBO_V3" && Array.isArray(config?.options)) {
         const branches = new Map();
         budget.take(config.options.length);
+        const invalid = config.options.filter(option => typeof option?.key !== "string").length;
+        if (invalid) schema.warnings.push({ input: name, detail: `${invalid} dynamic options have invalid keys` });
         for (const option of config.options) {
           if (typeof option?.key !== "string") continue;
           const branch = inputSchema(option.inputs, name, budget, depth + 1);
@@ -465,13 +483,14 @@ export function objectInfoView(raw, classes = null, error = null) {
   let out = { types: null, outputClasses: null, enums: null, lazyInputs: null, dynamicCombos: null, declarations: null, outputs: null, installed: null, schemaError: error };
   try {
     if (raw) {
-      const candidate = { types: new Map(), outputClasses: new Set(), enums: new Map(), lazyInputs: new Map(), dynamicCombos: new Map(), declarations: new Map(), outputs: new Map(), installed: new Set(), schemaError: null };
+      const candidate = { types: new Map(), outputClasses: new Set(), enums: new Map(), lazyInputs: new Map(), dynamicCombos: new Map(), declarations: new Map(), outputs: new Map(), installed: new Set(), schemaError: null, schemaWarnings: [] };
       const budget = schemaBudget();
       const entries = classes === null ? Object.entries(raw) : classes.filter(type => Object.hasOwn(raw, type)).map(type => [type, raw[type]]);
       for (const [type, def] of entries) {
         // Presence in object_info is the backend's own statement that a class is installed.
         candidate.installed.add(type);
         const schema = inputSchema(def?.input, type, budget);
+        candidate.schemaWarnings.push(...schema.warnings.map(warning => ({ ...warning, type })));
         budget.set(candidate.lazyInputs, type, new Set([...schema.lazy].map(key => key.slice(type.length + 1))));
         if (def?.output_node) { budget.take(); candidate.outputClasses.add(type); }
         if (Array.isArray(def?.output)) {
@@ -483,7 +502,7 @@ export function objectInfoView(raw, classes = null, error = null) {
       }
       out = candidate;
     }
-  } catch (error) { out.schemaError = error.message; /* No partial view is published. */ }
+  } catch (error) { out.schemaError = error.message; if (error.schemaIssue) out.schemaIssue = error.schemaIssue; /* No partial view is published. */ }
   return out;
 }
 
@@ -557,15 +576,14 @@ export function comfyClient(addr, { fetcher = fetch, clock = () => performance.n
         config = { at: clock(), value: support };
       } else {
         if (!r.ok) throw new Error(`ComfyUI inventory: ${r.status}`);
-        const nested = normalizeInventory(r.payload);
-        if (nested.some(({ name }) => !name.includes("/"))) throw new Error("ComfyUI descendant inventory: unexpected root entry");
-        const items = [...roots, ...nested];
+        const nested = normalizeInventory(r.payload, { descendants: true });
+        const items = [...roots.items, ...nested.items];
         assertAlive();
         recursiveKnown = true;
-        return { coverage: "recursive", subfolders: support, items };
+        return { coverage: "recursive", subfolders: support, items, skipped: mergeSkipped(roots.skipped, nested.skipped) };
       }
     }
-    return { coverage: "root-only", subfolders: support, items: roots };
+    return { coverage: "root-only", subfolders: support, items: roots.items, skipped: roots.skipped };
   }
 
   async function observeNames(names, { signal, deadlineMs }) {
@@ -604,7 +622,7 @@ export function comfyClient(addr, { fetcher = fetch, clock = () => performance.n
       else throw new InventoryError("incomplete-metadata", `No valid metadata for ${item.name}`, { path: item.name });
     }
     for (const name of firstMissing) if (!current.has(name)) unavailable.push({ name, reason: "not-found-after-reconcile", status: 404 });
-    return { records, discovered: [...discovered], unavailable, coverage: listed.coverage, subfolders: listed.subfolders };
+    return { records, discovered: [...discovered], unavailable, coverage: listed.coverage, subfolders: listed.subfolders, skipped: listed.skipped };
   }
   owner = makeInventoryOwner({ collect, clock, epoch, waveTimeoutMs, readerTimeoutMs });
   metadata = makeMetadataCollector({ urlFor: (name, kind) => viewUrl(addr, name, kind), fetcher, clock,
@@ -617,6 +635,15 @@ export function comfyClient(addr, { fetcher = fetch, clock = () => performance.n
   };
   const object = (v) => v && typeof v === "object" && !Array.isArray(v);
   const generationTimes = makeGenerationTimes();
+  const submissions = makePromptLane((prompt, { signal, onSent }) => {
+    const request = promptRequest(`http://${addr}/api/prompt`, submissionBody(prompt), {
+      signal: AbortSignal.any([signal, AbortSignal.timeout(HOST_TIMEOUT_MS)]), onSent,
+    });
+    return { sent: request.sent, result: request.result.then(async ({ response, error, sent }) => {
+      try { return { ...(error ? enqueueFailure(addr, error) : await enqueueResponse(addr, response)), sent }; }
+      catch (error) { return { ...enqueueFailure(addr, error), sent }; }
+    }) };
+  }, { signal: owner.signal });
   let historyReady = false, fullHistoryTask = null;
   const readHistory = async ({ maxItems, promptId, signal } = {}) => {
     const path = promptId ? `/api/history/${encodeURIComponent(promptId)}`
@@ -671,7 +698,8 @@ export function comfyClient(addr, { fetcher = fetch, clock = () => performance.n
     hasAssetsPlus: () => hasAssetsPlus(addr, assetsPlus, { fetcher }),
     objectInfo: (options) => objectInfo(addr, objectInfoCache, { fetcher, ...options }),
     progressSocket: () => new WebSocket(`ws://${addr}/ws?clientId=${crypto.randomUUID()}`),
-    enqueue: (prompt) => enqueue(addr, prompt, { fetcher }),
+    enqueue: (prompt) => submissions.submit(prompt).result,
+    submit: (prompt, ports) => submissions.submit(prompt, ports),
     async queue({ signal } = {}) {
       const d = await telemetry("/api/queue", signal);
       const ids = (rows) => {
@@ -748,26 +776,33 @@ export async function enqueue(addr, prompt, { fetcher = fetch } = {}) {
     const resp = await fetcher(`http://${addr}/api/prompt`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: stringifyExactJson({ ...prompt, prompt: freshSubmissionGraph(prompt.prompt) }),
+      body: submissionBody(prompt),
       signal: AbortSignal.timeout(HOST_TIMEOUT_MS),
     });
+    return await enqueueResponse(addr, resp);
+  } catch (e) { return enqueueFailure(addr, e); }
+}
+
+const submissionBody = prompt => stringifyExactJson({ ...prompt, prompt: freshSubmissionGraph(prompt.prompt) });
+function enqueueFailure(addr, error) {
+  console.error(`[comfy] enqueue ${logValue(addr)} -> fetch failed: ${logValue(error.message)}`);
+  return { ok: false, status: 502, error: `fetch failed: ${error.message}`, failure: { kind: "transport", reason: error.message } };
+}
+async function enqueueResponse(addr, resp) {
     if (!resp.ok) {
       const text = await resp.text();
       console.error(`[comfy] enqueue ${logValue(addr)} -> ${resp.status}: ${logValue(text)}`);
-      return { ok: false, status: resp.status, error: `ComfyUI ${resp.status}: ${text.slice(0, 200)}` };
+      let data; try { data = JSON.parse(text); } catch { /* Non-JSON bodies remain readable evidence. */ }
+      return { ok: false, status: resp.status, error: `ComfyUI ${resp.status}: ${text.slice(0, 200)}`, failure: { kind: "rejected", status: resp.status, reason: data?.error?.message ?? text, ...(data?.node_errors ? { nodeErrors: data.node_errors } : {}) } };
     }
     const data = await resp.json().catch(() => null);
     const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
     const identity = object(data) && typeof data.prompt_id === "string" && data.prompt_id.trim() && data.prompt_id === data.prompt_id.trim();
     const nodeErrors = object(data?.node_errors) ? data.node_errors : null;
     if (!identity || nodeErrors === null || data.error !== undefined) {
-      return { ok: true, status: resp.status, acceptance: "uncertain", error: "submission acceptance is unconfirmed; do not automatically resubmit" };
+      return { ok: true, status: resp.status, acceptance: "uncertain", error: "submission acceptance is unconfirmed; do not automatically resubmit", failure: { kind: "receipt", reason: "missing/invalid prompt ID, node errors or error-free JSON receipt" } };
     }
     const partial = Object.keys(nodeErrors).length > 0;
     return { ok: true, status: resp.status, acceptance: partial ? "partial" : "confirmed",
       promptId: data.prompt_id, nodeErrors, ...(partial ? { error: "ComfyUI accepted only part of the prompt (node errors); configuration was not acknowledged" } : {}) };
-  } catch (e) {
-    console.error(`[comfy] enqueue ${logValue(addr)} -> fetch failed: ${logValue(e.message)}`);
-    return { ok: false, status: 502, error: `fetch failed: ${e.message}` };
-  }
 }

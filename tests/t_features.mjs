@@ -100,7 +100,7 @@ Deno.test("features: run enqueues per permutation, caps at 413, no host# tag", a
   assertEquals(enqueued.length, 1);
 
   // over the cap → 413
-  r = await run({ "9.denoise": { enabled: true, min: 0, max: 1, increment: 0.001 } });
+  r = await run({ "9.denoise": { enabled: true, min: 0, max: 1, increment: 0.0005 } });
   assertEquals(r.status, 413);
 
   // a range without increment → 400 (the legacy global fallback is gone)

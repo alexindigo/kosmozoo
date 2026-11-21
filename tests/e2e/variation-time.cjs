@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, settledCount } = require('./variation-add-helpers.cjs');
 const ENGINE = process.env.E2E_ENGINE, FAKE = process.env.E2E_FAKE, OUT = process.env.KZ_TIME_EVIDENCE;
 const KZ = `(await import('/store/instance.js')).appStore`;
 const request = async (base, path, body) => {
@@ -29,7 +29,7 @@ const timing = (id, output, milliseconds) => ({ id, output, fixture: 'flux-basic
   const row = '[data-param-key="9.steps"]';
   const field = async (selector, value) => page.evaluate(`(()=>{const el=document.querySelector(${JSON.stringify(selector)});if(!el)throw Error('missing field');el.value=${JSON.stringify(value)};el.dispatchEvent(new Event('input',{bubbles:true}));})()`);
   const wait = async (count, time) => {
-    await page.poll(`document.querySelector('.vz-count')?.textContent===${JSON.stringify(count)} && document.querySelector('.vz-time-value')?.textContent===${JSON.stringify(time)}`, 15000);
+    await settledCount(page, count, { and: `document.querySelector('.vz-time-value')?.textContent===${JSON.stringify(time)}`, timeout: 15000 });
     const geometry = await page.evaluate(`(()=>{
       const selectors=['.vz-count-group > .vz-rlabel','.vz-time-label','.vz-count','.vz-time-value','.vz-right','.vz-run','.vz-panel'];
       const elements=selectors.map(s=>document.querySelector(s)),rects=elements.map(e=>e.getBoundingClientRect());
@@ -70,7 +70,7 @@ const timing = (id, output, milliseconds) => ({ id, output, fixture: 'flux-basic
     await field(row + ' .vz-range-field:nth-child(2) input', '19');
     await field(row + ' .vz-row-inc-input', '1');
     await wait('2', '24m');
-    await field(row + ' .vz-row-inc-input', '-'); await wait('—', '--');
+    await field(row + ' .vz-row-inc-input', '-'); await wait('--', '--');
     await close();
     await open(['estimate/a.png', 'estimate/b.png']); await wait('2', '18m'); await close();
     await open(['estimate/a.png', 'estimate/unknown.png']);

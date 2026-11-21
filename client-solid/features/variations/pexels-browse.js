@@ -2,11 +2,12 @@
 // service and search text. It owns no image-set membership; the editor turns
 // a chosen photo into a File through its own acquisition lane.
 
+import { variationProblem, problemFrom, problemText } from "/shared/features/variations/problems.mjs";
 export const SEARCH_DELAY_MS = 300;
 const RETAINED_LISTINGS = 24;
 const errorText = error => error?.detail || error?.message || String(error);
 
-export function makePexelsBrowse({ api, changed = () => {}, delay = SEARCH_DELAY_MS, timers = globalThis }) {
+export function makePexelsBrowse({ api, changed = () => {}, delay = SEARCH_DELAY_MS, timers = globalThis, name = id => id }) {
   const listings = new Map(), shown = new Map();
   let alive = true, timer = null, scheduled = null;
   const keyOf = (service, query) => JSON.stringify([service, query.trim()]);
@@ -38,14 +39,27 @@ export function makePexelsBrowse({ api, changed = () => {}, delay = SEARCH_DELAY
       const result = await api.pexelsPhotos(entry.service, entry.query, page, controller.signal);
       if (!owns(entry, controller)) return;
       if (!Array.isArray(result?.photos)) throw new Error("The service sent no photo list");
+      let invalid = 0, duplicates = 0;
       for (const photo of result.photos) {
-        if (typeof photo?.id !== "string" || entry.byId.has(photo.id)) continue;
+        if (typeof photo?.id !== "string") { invalid++; continue; }
+        if (entry.byId.has(photo.id)) { duplicates++; continue; }
         entry.byId.set(photo.id, photo); entry.photos.push(photo.id);
       }
       Object.assign(entry, { page, more: !!result.more, curated: result.curated !== false });
+      const counts = { source: result.skipped?.source ?? entry.service, received: result.skipped?.received ?? result.photos.length,
+        shown: result.photos.length - invalid - duplicates, invalid: (result.skipped?.invalid ?? 0) + invalid,
+        duplicates: (result.skipped?.duplicates ?? 0) + duplicates, page };
+      entry.notices = counts.invalid || counts.duplicates ? [variationProblem("photos-skipped", { severity: "warning", phase: "acquisition", source: counts.source, numbers: counts })] : [];
       shown.set(entry.service, entry);
     } catch (error) {
-      if (owns(entry, controller) && !controller.signal.aborted) entry.error = errorText(error);
+      if (owns(entry, controller) && !controller.signal.aborted) {
+        const source = name(entry.service), cause = error?.problem ? problemFrom(error, { source }) : null;
+        // A later page keeps the photos already shown; the first page shows none.
+        const problem = page > 1 ? variationProblem("pexels-page", { phase: "pexels", source, what: entry.query ? `search ${JSON.stringify(entry.query)}` : "curated photos",
+            numbers: { page, loaded: entry.photos.length }, detail: (cause?.message ?? errorText(error)).replace(/[.\s]+$/, "") })
+          : cause ?? variationProblem("pexels-search", { phase: "pexels", source, query: entry.query, detail: errorText(error) });
+        entry.error = problemText(problem);
+      }
     } finally {
       if (entry.controller === controller) { entry.pending = false; entry.controller = null; notify(); }
     }
@@ -69,6 +83,7 @@ export function makePexelsBrowse({ api, changed = () => {}, delay = SEARCH_DELAY
         error: entry?.error ?? "", searchOnly,
         stale: pending && !!settled && settled !== entry,
         appending: !!entry && entry.page > 0 && entry.pending,
+        ...(source?.notices?.length ? { notices: source.notices } : {}),
       };
     },
     photo(service, id) {

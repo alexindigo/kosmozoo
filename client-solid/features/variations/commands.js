@@ -1,8 +1,9 @@
 // Feature semantic definitions over injected composition/owner operations.
 import { isEntryName } from "/shared/entry-path.mjs";
 import { sourceOrigin } from "/shared/source-origin.mjs";
+import { variationProblem } from "/shared/features/variations/problems.mjs";
 
-export function variationCommands({ state, broker }) {
+export function variationCommands({ state, broker, report = () => {} }) {
   const resolve = (id) => {
     const live = state.images[state.imageIdxById().get(id)];
     if (live) return live;
@@ -23,7 +24,11 @@ export function variationCommands({ state, broker }) {
       execute(a) {
         const ids = a.id ? [a.id] : a.ids ? [...a.ids] : state.images.filter((image) => state.selected[image.id]).map((image) => image.id);
         const images = ids.map(resolve).map(image => image ? { ...image, origin: sourceOrigin(image.host, state.hosts[image.host]) } : null);
-        return images.some((image) => !image) ? Promise.resolve({ status: "stale" }) : broker.open(images, a.bulk ?? !a.id);
+         if (!images.length || images.some(image => !image)) {
+           const problem = variationProblem("opening-unavailable", { phase: "opening", numbers: { selected: ids.length, missing: images.filter(image => !image).length }, names: ids.filter((id, index) => !images[index]) });
+           report(problem); return Promise.resolve({ status: "stale" });
+         }
+         return broker.open(images, a.bulk ?? !a.id);
       } },
     { id: "variations.close", validate: (a) => Object.keys(a).every((key) => ["automatic", "session"].includes(key)) &&
       (a.automatic === undefined || typeof a.automatic === "boolean") && (a.session === undefined || typeof a.session === "string"), execute: broker.close },

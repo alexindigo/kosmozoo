@@ -505,6 +505,9 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .statuschip.error { color: var(--negative); border-left-color: var(--error); }
 .statuschip.warning { color: var(--warning); border-left-color: var(--warning); }
 .statuschip.statuschip-static { cursor: default; }
+.statuschip { display: flex; align-items: center; gap: 10px; }
+.statuschip-message { min-width: 0; overflow-wrap: anywhere; }
+.statuschip-action { flex: none; white-space: nowrap; }
 
 /* --- the modal contract : ONE backdrop + panel pair. Every modal
  renders .modal-backdrop/.modal-panel (Modal.tsx portals them to body);
@@ -917,15 +920,19 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 /* vertical divider */
 .vz-divider { width: 1px; background: var(--foreground-dim); flex: 0 0 auto; }
 
-/* The sidebar owns content overflow separately from the pinned message/action.
-   Its body scrolls; messages have a bounded lane directly above Queue. */
-.vz-right { display: grid; grid-template-rows: minmax(0, 1fr) auto auto;
-  gap: 10px; min-height: 0; container-type: size; }
+/* Text cannot resize these tracks. Only the body scrolls; the status and Run
+   allocations stay reserved even when empty or replaced by submission progress. */
+.vz-right { display: grid; grid-template-rows: minmax(0, 1fr) 3lh 38px;
+  gap: 10px; min-height: 0; line-height: 16px; }
 .vz-sidebar-body { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; }
 .vz-sidebar-body > * { flex: 0 0 auto; }
 .vz-count-group, .vz-naming-group { display: grid; gap: 4px; align-content: start; }
-.vz-messages { display: flex; flex-direction: column; min-height: 0; max-height: min(40cqb, 8lh); overflow-y: auto; }
-.vz-message-content { flex: 0 0 auto; margin-block-start: auto; }
+.vz-messages { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px;
+  min-height: 0; min-width: 0; font: 12px/16px system-ui; }
+.vz-message-content { min-width: 0; overflow: hidden; display: -webkit-box;
+  -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.vz-messages .vz-message-content > p { margin: 0; font: inherit; overflow-wrap: anywhere; }
+.vz-messages > .vz-catalogue-retry { align-self: start; }
 .vz-rlabel { color: var(--foreground); font-size: 12px; font-weight: 400;
   margin-top: 10px; }
 .vz-rlabel:first-child { margin-top: 0; }
@@ -1036,20 +1043,19 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 /* Image curation: one quiet sheet; presentation order commits through the recipe. */
 .vz-image-content { position: relative; display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .vz-image-grid { position: relative; display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 6px; }
-.vz-image-tile, .vz-image-plus, .vz-image-drop-gap { position: relative; min-width: 0; aspect-ratio: 1; border-radius: 4px; }
+.vz-image-tile, .vz-image-drop-gap { position: relative; min-width: 0; aspect-ratio: 1; border-radius: 4px; }
 .vz-image-tile { touch-action: none; cursor: grab; outline-offset: 2px; }
-.vz-image-tile:focus-visible, .vz-image-plus:focus-visible { outline: 2px solid var(--secondary); }
+.vz-image-tile:focus-visible { outline: 2px solid var(--secondary); }
 .vz-image-preview { position: absolute; inset: 0; background: var(--background-stage); border-radius: inherit; overflow: hidden; }
 .vz-image-tile > .vz-image-same { position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 2px var(--attention); pointer-events: none; }
 .vz-image-remove { position: absolute; top: 4px; right: 4px; opacity: 0; }
-.vz-image-tile:hover .vz-image-remove, .vz-image-tile:focus-within .vz-image-remove { opacity: 1; }
+.vz-image-rotate { position: absolute; inset: auto 4px 4px auto; opacity: 0; }
+.vz-image-tile:hover :is(.vz-image-remove, .vz-image-rotate), .vz-image-tile:focus-within :is(.vz-image-remove, .vz-image-rotate) { opacity: 1; }
 .vz-image-dragging { z-index: 2; cursor: grabbing; box-shadow: 0 8px 24px var(--backdrop); }
-.vz-image-plus { border: 1px dashed var(--border-strong); color: var(--foreground); background: transparent; font: inherit; font-size: 28px; cursor: pointer; }
-.vz-image-plus:hover { color: var(--foreground); border-color: var(--foreground-dim); }
 .vz-image-check { position: absolute; inset: 0; display: grid; place-items: center; background: var(--backdrop); pointer-events: none; }
-.vz-image-check::after { content: ""; width: 16px; height: 16px; border: 2px solid var(--foreground-dim); border-top-color: var(--foreground); border-radius: 50%; animation: vz-image-spin .8s linear infinite; }
+.vz-image-check::after, .vz-submit-spinner { content: ""; width: 16px; height: 16px; border: 2px solid var(--foreground-dim); border-top-color: var(--foreground); border-radius: 50%; animation: vz-image-spin .8s linear infinite; }
 @keyframes vz-image-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .vz-image-check::after { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .vz-image-check::after, .vz-submit-spinner { animation: none; } }
 .vz-image-inspection-error { position: absolute; inset: auto 0 0; padding: 4px; background: var(--backdrop); }
 .vz-parameter.vz-image-dropping { border-color: var(--secondary); box-shadow: inset 0 0 0 1px var(--secondary); }
 .vz-image-drop-status { display: block; margin-top: 8px; font-size: 11px; }
@@ -1059,7 +1065,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-image-error { color: var(--error); overflow-wrap: anywhere; }
 .vz-image-empty { margin: 0; }
 .vz-image-add { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px; background: var(--focused-background); border: 1px solid var(--border); border-radius: 4px; }
-.vz-image-add[hidden], .vz-image-folder[hidden] { display: none; }
+.vz-image-folder[hidden] { display: none; }
 .vz-image-folder { width: 100%; min-width: 0; }
 .vz-image-external { margin-inline-start: auto; }
 .vz-image-action { background: var(--lifted); color: var(--foreground); border: 1px solid var(--border-strong); border-radius: 4px; padding: 5px 8px; font: inherit; cursor: pointer; }
@@ -1101,16 +1107,32 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   .vz-input-placeholder, .vz-thumbnail-pending:not(.vz-thumbnail-acquiring) { animation: none; }
   .vz-input-activity-bar.is-active::after { animation: none; width: 100%; opacity: .5; }
 }
-.vz-input-option { width: var(--vz-input-tile-size); height: var(--vz-input-tile-size); display: grid;
+.vz-input-option { position: relative; width: var(--vz-input-tile-size); height: var(--vz-input-tile-size); display: grid;
   border: 2px solid transparent; border-radius: 4px; padding: 0; background: var(--background-stage); color: var(--foreground); font: inherit; cursor: pointer; }
 .vz-input-option img { grid-area: 1 / 1; width: 100%; height: 100%; min-height: 0; object-fit: contain; border-radius: 2px; }
 .vz-input-option:hover, .vz-input-option.vz-input-active { border-color: var(--foreground-dim); }
 .vz-input-option[aria-selected="true"] { border-color: var(--secondary); }
+.vz-input-option:hover, .vz-image-tile:hover { outline: 2px solid var(--foreground); outline-offset: -2px; }
+.vz-input-list:focus-visible { outline: 2px solid var(--secondary); outline-offset: -2px; }
 .vz-input-option:focus-visible { outline-offset: -4px; }
 .vz-input-option .vz-image-same, .vz-input-selected { grid-area: 1 / 1; margin: 4px; padding: 1px 4px; border-radius: 3px; background: var(--backdrop); }
 .vz-input-option .vz-image-same { align-self: stretch; justify-self: stretch; margin: 0; padding: 0;
   background: transparent; border: 2px solid var(--attention); border-radius: inherit; pointer-events: none; }
 .vz-input-selected { align-self: start; justify-self: end; color: var(--secondary); font-weight: 600; }
+.vz-input-selected svg { display: block; width: 14px; height: 14px; }
+.vz-input-judgments { position: absolute; inset: 4px auto auto 4px; display: flex; gap: 0; pointer-events: none; }
+.vz-input-judgment { width: 8px; height: 8px; box-sizing: border-box; border: 1px solid var(--background-stage); border-radius: 50%; }
+.vz-input-judgment.is-up { background: var(--positive); }
+.vz-input-judgment.is-favorite { background: var(--attention); }
+.vz-input-judgment.is-bookmark { background: var(--primary); }
+.vz-input-toolbar { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.vz-input-toolbar > .text-field-control { flex: 1; min-width: 0; }
+.vz-input-filters { display: flex; align-items: center; flex: none; }
+.vz-input-filter.is-up { --picker-filter-color: var(--positive); }
+.vz-input-filter.is-favorite { --picker-filter-color: var(--attention); }
+.vz-input-filter.is-bookmark { --picker-filter-color: var(--primary); }
+.vz-input-filter circle { stroke: var(--picker-filter-color); stroke-width: 2; fill: none; }
+.vz-input-filter.on circle { fill: var(--picker-filter-color); }
 /* The picture/selection share one cell; Retry is a separate sibling action.
    Fixed allocation is also the virtualizer's tile/row geometry contract. */
 .vz-thumbnail { display: grid; min-width: 0; min-height: 0; width: 100%; height: 100%; }
@@ -1130,6 +1152,21 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
   border-radius: 4px; background: var(--lifted); color: var(--foreground); cursor: pointer; }
 .vz-thumbnail-retry:hover { border-color: var(--foreground-dim); }
 .vz-thumbnail-retry:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+/* Space peek: a pointer-transparent top-layer view above the dialog and its
+   popups. The frame centres structurally; only its fitted size is inline. */
+.vz-peek { position: fixed; inset: 0; width: auto; height: auto; max-width: none; max-height: none;
+  margin: 0; padding: 0; border: 0; background: none; overflow: hidden; pointer-events: none; }
+.vz-peek:popover-open { display: block; }
+.vz-peek-backdrop { position: absolute; inset: 0; background: var(--backdrop); opacity: 0; }
+.vz-peek-backdrop.is-open { opacity: 1; }
+.vz-peek-frame { position: absolute; inset: 0; margin: auto; display: grid; transform-origin: 0 0; }
+.vz-peek-image { grid-area: 1 / 1; width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: contain; visibility: hidden; }
+.vz-peek-image.is-shown { visibility: visible; background: var(--background-stage); box-shadow: 0 6px 24px var(--backdrop); }
+.vz-peek-frame.is-empty { width: min(320px, calc(100% - 64px)); height: min(200px, calc(100% - 64px)); place-items: center; padding: 12px;
+  border-radius: 4px; background: var(--background-stage); }
+.vz-peek-loading { grid-area: 1 / 1; display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+.vz-peek-loading > .vz-submit-spinner { flex: none; }
+.vz-peek-failure { grid-area: 1 / 1; max-width: 100%; font: 13px/18px system-ui; color: var(--error); }
 @media (max-width: 380px) { .vz-input-popover { --vz-input-columns: 2; } }
 @media (max-width: 270px) { .vz-input-popover { --vz-input-columns: 1; } }
 @media (max-width: 620px) {
@@ -1154,6 +1191,8 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-folder-path { flex: 1; width: 100%; }
 .vz-image-action:disabled { opacity: .5; cursor: default; }
 .vz-image-add { align-items: start; }
+.vz-image-add { flex: none; }
+.vz-image-picked { min-height: 0; max-height: 50vh; overflow-y: auto; scrollbar-gutter: stable; padding: 2px; }
 
 .vz-folder-chooser { display: flex; align-items: center; flex: 0 0 auto; }
 .vz-folder-chooser button:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
@@ -1164,8 +1203,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 :where(.single-line-text) { display: block; min-width: 0; max-width: 100%;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* The field filter stays above the scrolling rows; count uses its natural line. */
-.vz-count { line-height: normal; }
+/* The field filter stays above the scrolling rows. */
 .vz-filter-tools { display: flex; flex: 0 0 auto;
   position: sticky; top: 0; z-index: 2; background: var(--focused-background); }
 .vz-field-filter.search-control { flex: 1; }
@@ -1240,20 +1278,26 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-root label { white-space: nowrap; }
 .vz-slider-row:not(:has(.vz-slider)) .vz-range-field > input { width: 23ch; max-width: 100%; }
 
-.vz-count-sub { margin: 0; line-height: 16px; overflow-wrap: anywhere; }
+.vz-count-sub { margin: 0; line-height: 16px; block-size: 2lh; overflow-wrap: anywhere;
+  overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .vz-count-large { font-size: 23px; }
-.vz-count-group { grid-template-columns: minmax(0, 1fr) max-content; column-gap: 12px; align-items: baseline; }
+.vz-count-group { grid-template-columns: minmax(0, 1fr) max-content; grid-template-rows: 1lh 46px 2lh; column-gap: 12px; align-items: baseline; }
+.vz-count-group .vz-count { line-height: 46px; margin-top: 0; }
 .vz-count-group .vz-rlabel { margin: 0; white-space: nowrap; }
 .vz-time-label, .vz-time-value { grid-column: 2; }
 .vz-count-group .vz-count, .vz-time-value { grid-row: 2; }
-.vz-time-value { font-size: 14px; font-variant-numeric: tabular-nums; color: var(--foreground); }
+.vz-time-value { contain: inline-size; font-size: 14px; font-variant-numeric: tabular-nums; color: var(--foreground); }
 .vz-count-group .vz-count-sub { grid-column: 1 / -1; }
 .vz-body { grid-template-columns: 210px minmax(320px, 1fr) 220px; min-width: 782px; }
 .vz-naming-group { grid-template-columns: 38px minmax(0, 1fr); align-items: center; }
 .vz-naming-group .vz-rlabel { grid-column: 1 / -1; }
 .vz-naming-group label { color: var(--foreground-mid); margin: 0; }
 .vz-naming-group .vz-tinput { width: 100%; }
-.vz-output-preview { grid-column: 1 / -1; display: grid; gap: 4px; }
+.vz-naming-feedback { grid-column: 1 / -1; line-height: 16px; block-size: 3lh; overflow: hidden;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.vz-naming-feedback > p { margin: 0; font: inherit; }
+.vz-output-preview { grid-column: 1 / -1; display: grid; grid-template-rows: 1lh 1lh; gap: 4px; }
+.vz-output-empty { visibility: hidden; }
 .vz-output-example { color: var(--foreground); }
 .vz-queued { margin: 0 0 8px; font: 13px/18px system-ui; }
 .vz-ok { color: var(--positive); }
@@ -1269,9 +1313,12 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .media-seek-slot .media-seek { width: 100%; min-width: 0; margin: 0; }
 .media-time { min-width: 13ch; text-align: center; }
 .confirm-actions { min-height: 28px; align-items: center; }
-.confirm-error { color: var(--negative); font-size: 12px; }
-.vz-run-slot { min-height: 38px; display: grid; text-align: center; }
+.confirm-error { color: var(--negative); font-size: 12px; overflow-wrap: anywhere; }
+.delete-down-voted { min-width: 0; max-width: 100%; }
+.vz-run-slot { min-height: 0; min-width: 0; display: grid; grid-template-rows: minmax(0, 1fr); text-align: center; }
 .vz-run-slot > .vz-field-help { align-self: center; }
+.vz-submitting { display: flex; align-items: center; justify-content: center; gap: 8px; min-width: 0; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.vz-submit-spinner { flex: none; }
 .vz-folder-controls > .vz-field-help { margin: 0; }
 #diffBar { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
 #diffBar #diffModes { position: static; transform: none; }
@@ -1356,17 +1403,20 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .tabs-tab.is-active { background: var(--lifted); border-color: var(--secondary); }
 .tabs > .tabs-tab:focus-visible { outline: none; border-color: var(--secondary); box-shadow: inset 0 0 0 1px var(--secondary); }
 .vz-input-tabs { flex: 0 0 auto; min-width: 0; }
-.vz-input-summary { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; min-width: 0; overflow-x: auto; }
-.vz-input-summary > span:first-child, .vz-input-feeds { flex: 0 0 auto; white-space: nowrap; }
+.vz-input-summary { display: grid; grid-template-columns: max-content; align-items: center; gap: 12px;
+  flex: 0 0 auto; width: max-content; max-width: 100%; min-width: 0; overflow-x: auto; }
+.vz-input-summary:has(.vz-input-feeds) { grid-template-columns: max-content max-content; }
+.vz-input-summary > span:first-child { grid-area: 1 / 1; white-space: nowrap; }
+.vz-input-feeds { grid-area: 1 / 2; white-space: nowrap; }
 .vz-input-summary > [role="status"] { font: 12px/16px system-ui; }
-.vz-input-activity { flex: 1 1 auto; min-width: 0; color: var(--foreground-mid); }
-.vz-input-feeds { margin-inline-start: auto; }
+/* Loading text gets its own row, but cannot set the count/feed width floor. */
+.vz-input-activity { grid-column: 1 / -1; grid-row: 2; contain: inline-size; min-width: 0; color: var(--foreground-mid); }
 .vz-input-feeds .tabs { overflow: visible; }
 .vz-input-source-panel { position: relative; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .vz-input-status { margin: 6px 0; }
 .vz-input-failure { display: flex; align-items: center; gap: 6px; color: var(--error); }
 .vz-input-failure[hidden] { display: none; }
-.vz-thumbnail-acquiring { z-index: 1; background: var(--backdrop); pointer-events: none; }
+.vz-thumbnail-acquiring { display: flex; align-items: center; justify-content: center; z-index: 1; background: var(--backdrop); pointer-events: none; }
 .vz-thumbnail-failed { min-width: 0; width: 100%; }
 .vz-thumbnail img { visibility: hidden; }
 .vz-thumbnail img.vz-thumbnail-loaded { visibility: visible; }
@@ -1405,7 +1455,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 /* One grid for the whole list; each row is a subgrid, so the key marker and
    remove columns are shared by every row whether or not a row fills them. */
 .pexels-services { list-style: none; margin: 0; padding: 0; display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto; column-gap: 6px; row-gap: 2px; }
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto; column-gap: 6px; row-gap: 2px; }
 .pexels-service { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center;
   border-radius: 4px; }
 .pexels-service.is-editing { background: var(--lifted); }
@@ -1417,7 +1467,8 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 @keyframes pexels-checking { to { opacity: .3; } }
 @media (prefers-reduced-motion: reduce) { .pexels-service-status.is-checking { animation: none; } }
 .pexels-service-key { grid-column: 3; }
-.pexels-service > .icon-button { grid-column: 4; }
+.pexels-service > .icon-button { grid-column: 5; }
+.pexels-service > .icon-button.pexels-recheck { grid-column: 4; }
 .pexels-service-problem { font-size: 11px; color: var(--negative); }
 #chrome button.pexels-service-open { grid-column: 2; display: flex; flex-direction: column; align-items: stretch; min-width: 0; gap: 1px;
   padding: 3px 6px; background: none; border: 1px solid transparent; text-align: start; color: var(--foreground); }
@@ -1430,6 +1481,7 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 #chrome button.pexels-remove { color: var(--negative); border-color: var(--negative-dim); }
 .pexels-settings-empty { margin: 0; color: var(--foreground-mid); font-size: 12px; }
 .pexels-settings-error { display: flex; align-items: center; gap: 8px; color: var(--error); }
+.pexels-settings-error-text { flex: 1; margin: 0; font-size: 12px; }
 .pexels-form { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 6px 8px; }
 .pexels-form label { white-space: nowrap; color: var(--foreground-mid); font-size: 12px; }
 .pexels-form .text-field { min-width: 0; width: 100%; }
@@ -1533,12 +1585,20 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vz-batch-info { display: grid; gap: 6px; min-width: 0; }
 .vz-batch-name, .vz-batch-time { font-size: 12px; color: var(--foreground); }
 .vz-batch-remove { align-self: start; }
+.vz-batch-problem { border-color: var(--negative); }
+.vz-batch-issue { color: var(--negative); font-size: 12px; }
+.vz-batch-outcome { min-width: 0; font-size: 12px; }
+.vz-batch-queued { color: var(--positive); }
+.vz-run:disabled { cursor: default; opacity: .5; filter: none; box-shadow: none; }
 .vh-tools { display: grid; gap: 8px; min-width: 0; }
 .vh-trigger { width: 100%; min-width: 0; text-align: start; }
-.vh-trigger > .single-line-text { padding-inline: 10px; }
+.vh-trigger > .single-line-text { padding-inline: var(--vz-recall-text-inset, 10px); }
 .vh-menu { margin: 0; padding: 0; border: 1px solid var(--border-strong); border-radius: 6px;
   background: var(--focused-background); color: var(--foreground); box-shadow: 0 8px 24px var(--backdrop); overflow: auto; }
 .vh-menu-label { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.vh-menu:popover-open { display: flex; flex-direction: column; overflow: hidden; }
+.vh-menu > .vh-menu-label, .vh-menu > .vh-status { flex: 0 0 auto; }
+.vh-menu-list { min-height: 0; overflow: auto; }
 .vh-panel { flex: 1; min-height: 0; overflow: auto; background: var(--surface); }
 .vh-panel h2 { margin: 0; padding: 12px; font-size: 13px; font-weight: 500; border-bottom: 1px solid var(--border); }
 .vh-panel .vh-entry { margin: 0 10px; }
@@ -1590,9 +1650,11 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vh-recall:focus-visible, .vh-inspect:focus-visible { outline: 2px solid var(--secondary); outline-offset: 1px; }
 
 /* One compact header row: title, recall (flexible), Run on, close. Controls
-   share the md control height; the title's line box takes the same height. */
+   share the md control height; the title's line box takes the same height.
+   Recall reserves its chevron slot and the same label insets used below. */
 .vz-editor { grid-template-rows: auto minmax(0, 1fr) auto; }
-.vz-header { display: grid; grid-template-columns: max-content minmax(0, 1fr) minmax(120px, 220px) max-content;
+.vz-header { --vz-recall-text-inset: 10px; display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(calc(var(--control-height-md) + 2 * var(--vz-recall-text-inset)), 1fr) minmax(0, 220px) max-content;
   align-items: start; gap: 12px; }
 .vz-header > .vz-title { min-height: var(--control-height-md); display: flex; align-items: center; text-align: start; }
 .vz-header .vz-close { position: static; }

@@ -4,21 +4,29 @@ import { snapshotDraft, createRunId } from "./draft.js";
 import { editorDomain, choiceValues, numericDefaults, numericText, sliderNumber } from "./graph.mjs";
 import { parseExactJson, stringifyExactJson, sameJsonValue, resourceReferenceValue, resourceReferenceProblem } from "/shared/parameters.mjs";
 import { admitResourceTransfer } from "/shared/features/variations/compile.mjs";
-import { compileRecipe, parseRecipeCandidate, recipeImageView, currentRoot } from "/shared/features/variations/recipe-compile.mjs";
-import { acknowledgedHistoryFields, planHistoryOverlay, decodeHistoryRecipe } from "/shared/features/variations/history-codec.mjs";
+import { compileRecipe, compileNumericOperation, parseRecipeCandidate, recipeImageView, previewRecipeNaming, currentRoot } from "/shared/features/variations/recipe-compile.mjs";
+import { acknowledgedHistoryFields, planHistoryOverlay, decodeHistoryRecipe, encodeHistoryRecipe } from "/shared/features/variations/history-codec.mjs";
 import { permutationPlan,
   resolveRelativeRanges, acknowledgedFields, targetRunPlan, catalogueParams, parameterIndex, parameterCurrent, parameterLabel, parameterAliases,
    variationOutputName, uploadFamily, reproducesOriginal } from "/shared/features/variations/shared.mjs";
 import { validOrigin, sameOrigin, validContext, sameContext } from "/shared/source-origin.mjs";
 import { validImageSet, mergeImages, sameImage, imageIdentity, imageReference, imageReferenceValue, uploadImage } from "./image-set.js";
 import { classifyImageFiles } from "./image-drop.js";
-import { connectionPresentation } from "./field-filter.js";
+import { composeRotation, rotatedName } from "./image-rotate.js";
+import { connectionPresentation, connectionProblem } from "./field-filter.js";
 import { estimateGenerationTime, knownGenerationTime } from "./time-estimate.js";
+import { observeSubmission } from "./submission-progress.js";
+import { planPresentation } from "./plan-presentation.js";
+import { variationProblem, problemFrom, problemText, problemError } from "/shared/features/variations/problems.mjs";
+import { makeProblemOwner } from "./problem-presentation.js";
 import { staleSource, sourceFailure } from "./source-message.js";
 import { judgmentVisible } from "/js/image-visibility-model.mjs";
-import { makeVariationRecipe, validRecipeValue as validValue, freezeRecipe as freeze, moveRecipeImage } from "./recipe.js";
+import { judgmentMarkers } from "../../store/card-state.js";
+import { matchesPickerJudgments } from "./picker-judgments.js";
+import { isEntryLeaf } from "/shared/entry-path.mjs";
+import { makeVariationRecipe, validRecipeValue as validValue, freezeRecipe as freeze, moveRecipeImage, recipeField } from "./recipe.js";
 export { RECIPE_FIELDS as EDITOR_FIELDS } from "./recipe.js";
-const filename = value => typeof value === "string" && value.length > 0 && !/[\\/\x00-\x1f\x7f]/.test(value) && ![".", ".."].includes(value);
+const filename = isEntryLeaf;
 const allParameters = catalogue => catalogue.parameters ?? catalogueParams(catalogue);
 // Legacy-first ordering preserves existing manual aliases independently of layout.
 const namingParameters = catalogue => {
@@ -48,6 +56,11 @@ const ROW_STRATEGIES = {
 export function makeVariationEditor({ targets, cohortMode, destination: initialDestination = null, services, currentOrigin, changed = () => {}, close = () => {},
   setTimer = setTimeout, clearTimer = clearTimeout }) {
   const recipe = makeVariationRecipe();
+  const problems = makeProblemOwner(() => notify());
+  const parameter = id => ({ id, label: locations.find(location => location.id === id) ? row(locations.find(location => location.id === id).domain, id).metadata.label : id });
+  const targetIdentity = target => ({ index: capturedTargets.indexOf(target), id: target.id, source: target.host, name: target.filename });
+  const report = (key, code, context = {}) => problems.report(key, variationProblem(code, context));
+  let submission = null, stopProgress = null;
   const capturedTargets = freeze(snapshotDraft(targets));
   // Opening facts and recipe basis stay stable; only the private Run cohort shrinks.
   let selectedTargets = capturedTargets;
@@ -57,12 +70,16 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
   let conflicts = {}, unchecked = [], destinationPending = !!destination;
   // A failed catalogue request is a state with a way out, never a silent wait.
   let catalogueError = null;
+  let validationCache = null;
   const catalogues = new Map();
   const generationTimes = new Map(capturedTargets.map(target => [target.id, knownGenerationTime(target.generationTimeMs) ? target.generationTimeMs : null]));
   const timingController = new AbortController();
   let timingTask = null;
   let locations = [];
   const imageChecks = new Map(), confirmedUploads = new Map();
+  // Rotations compose over each original's bytes: a rotated File records its
+  // original item and quarter turns; each original caches one File per angle.
+  const rotations = new Map(), rotationSources = new Map(), rotating = new Map();
   const inputCatalogues = new Map(), sourceFiles = new Map(), pexelsFiles = new Map();
   const sourceLifetimes = new Map();
   const sourceRecord = (map, origin, create, root = "input") => {
@@ -78,52 +95,142 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     map.set(key, record); return record;
   };
   const cachedInput = (origin, name, root) => sourceRecord(sourceFiles, origin, null, root)?.files.get(name);
+  let acquisitionSerial = 0, acquiring = 0, drainingPicks = false;
+  const acquisitionQueue = [], orderedPicks = new Map();
+  const pumpAcquisitions = () => {
+    while (acquiring < 4 && acquisitionQueue.length) {
+      const task = acquisitionQueue.shift();
+      if (!alive || !task.owns()) { task.resolve(null); continue; }
+      acquiring++;
+      const run = async () => {
+        try { task.resolve(await task.read()); } catch (error) { task.reject(error); }
+        finally { acquiring--; pumpAcquisitions(); }
+      };
+      run();
+    }
+  };
+  const acquire = (read, owns) => new Promise((resolve, reject) => {
+    acquisitionQueue.push({ read, owns, resolve, reject }); pumpAcquisitions();
+  });
   const fileRecord = (files, name) => {
-    if (!files.has(name)) files.set(name, { file: null, pending: false, error: "", wanted: new Map() });
+    if (!files.has(name)) files.set(name, { key: ++acquisitionSerial, file: null, pending: false, error: "", wanted: new Map() });
     return files.get(name);
   };
-  // Remote bytes become one cached immutable File per resource. A toggle while
-  // reading records/withdraws only that row's membership intent; the settled
-  // File joins every row whose ticket is still admitted.
+  // Pending membership is editor-private intent, never a pretend File/recipe
+  // value. Both remote catalogues share bounded reads and one click-order lane
+  // per row. Cancellation retires only that choice; cached bytes remain reusable.
+  const livePick = pick => pick.cached.wanted.get(pick.id) === pick && admitsMembership(pick) && pick.owns();
+  const pendingPicks = (enabledOnly = false) => [...orderedPicks].flatMap(([id, picks]) =>
+    enabledOnly && !row("images", id)?.values.enabled ? [] : picks.filter(livePick));
+  const drainPicks = () => {
+    if (drainingPicks) return;
+    drainingPicks = true;
+    try {
+      for (const [id, picks] of orderedPicks) {
+        while (picks.length) {
+          const pick = picks[0], live = livePick(pick);
+          if (live && !pick.cached.file) break;
+          picks.shift();
+          if (pick.cached.wanted.get(id) === pick) pick.cached.wanted.delete(id);
+          if (live) {
+            const item = uploadImage(pick.cached.file), identity = imageIdentity(item);
+            const items = row("images", id).values.items;
+            const next = items.findIndex(other => !pick.before.has(imageIdentity(other)));
+            // Synchronous choices made after this click keep their later place,
+            // too. No unresolved placeholder enters the recipe or compiler.
+            for (const later of picks) later.before.add(identity);
+            pick.editor.addImages(id, [item], next < 0 ? items.length : next);
+          }
+        }
+        if (!picks.length) orderedPicks.delete(id);
+      }
+    } finally { drainingPicks = false; }
+  };
   const cachedFileState = (id, cached) => {
     const item = cached?.file ? uploadImage(cached.file) : null;
-    return { selected: !!item && row("images", id).values.items.some(other => sameImage(item, other)),
-      pending: !!cached?.pending && cached.wanted.has(id) && admitsMembership(cached.wanted.get(id)), error: cached?.error ?? "" };
+    const pending = !!cached?.wanted.get(id) && livePick(cached.wanted.get(id));
+    return { selected: pending || !!item && row("images", id).values.items.some(other => sameImage(item, other)),
+      pending, error: cached?.error ?? "" };
   };
-  const toggleCachedFile = async (editor, id, cached, label, read, owns) => {
-    if (cached.file) {
+  const toggleCachedFile = async (editor, id, cached, label, read, owns, context = {}) => {
+    const problemKey = rowId => `acquire:${rowId}:${cached.key}`;
+    if (cachedFileState(id, cached).selected) {
       cached.error = "";
-      const item = uploadImage(cached.file);
-      return cachedFileState(id, cached).selected ? editor.removeImage(id, item) : editor.addImages(id, [item]);
-    }
-    if (cached.wanted.has(id) && admitsMembership(cached.wanted.get(id))) cached.wanted.delete(id);
-    else cached.wanted.set(id, membershipTicket(id));
-    // Recorded intent is an edit in progress: a post-Run countdown cannot close over it.
-    invalidateClose();
-    if (cached.pending) { notify(); return; }
-    cached.pending = true; cached.error = ""; notify();
-    try {
-      const file = await read();
-      if (!owns()) return;
-      cached.file = file;
-      for (const [rowId, ticket] of [...cached.wanted]) {
-        if (cached.wanted.get(rowId) !== ticket) continue;
-        cached.wanted.delete(rowId);
-        if (admitsMembership(ticket)) editor.addImages(rowId, [uploadImage(file)]);
+      problems.clear(problemKey(id));
+      if (cached.wanted.has(id)) {
+        cached.wanted.delete(id); recipe.edited(); invalidateClose(); drainPicks(); notify(); return true;
       }
-    } catch (error) { if (owns()) { cached.wanted.clear(); cached.error = `${label}: ${error.message}`; } }
-    finally { if (owns()) { cached.pending = false; notify(); } }
+      return editor.removeImage(id, uploadImage(cached.file));
+    }
+    const pick = { ...membershipTicket(id), cached, editor, owns,
+      before: new Set(row("images", id).values.items.map(imageIdentity)) };
+    cached.wanted.set(id, pick);
+    if (!orderedPicks.has(id)) orderedPicks.set(id, []);
+    orderedPicks.get(id).push(pick);
+    // Recorded intent is an edit in progress: a post-Run countdown cannot close over it.
+    recipe.edited(); invalidateClose(); cached.error = ""; problems.clear(problemKey(id));
+    drainPicks();
+    if (cached.file || cached.pending) { notify(); return; }
+    cached.pending = true; notify();
+    try {
+      const file = await acquire(read, () => owns() && [...cached.wanted.values()].some(livePick));
+      if (!owns()) {
+        if (alive) for (const [rowId] of cached.wanted) report(problemKey(rowId), "acquisition-retired", { phase: "acquisition", parameter: parameter(rowId), resource: label });
+        cached.wanted.clear(); return;
+      }
+      cached.file = file;
+      drainPicks();
+    } catch (error) {
+      if (owns()) {
+        for (const [rowId, pick] of cached.wanted) if (livePick(pick)) {
+          const problem = problemFrom(error, { code: "acquisition-read", phase: "acquisition", parameter: parameter(rowId), resource: label, ...context });
+          cached.error = problemText(problem); problems.report(problemKey(rowId), problem);
+        }
+        cached.wanted.clear();
+      }
+      else {
+        if (alive) for (const [rowId] of cached.wanted) report(problemKey(rowId), "acquisition-retired", { phase: "acquisition", parameter: parameter(rowId), resource: label });
+        cached.wanted.clear();
+      }
+    }
+    finally { cached.pending = false; drainPicks(); notify(); }
   };
   const reference = (name, root) => ({ kind: "reference", value: resourceReferenceValue(name, root) });
   const resourceName = name => typeof name === "string" && !resourceReferenceProblem(null, name);
   const batch = cohortMode === "bulk" || capturedTargets.length > 1;
   let alive = true, closeGeneration = 0, decisionGeneration = 0, deciding = false, active = null, timer = null;
   let result = null, running = false, catalogueReady = false, acceptedRevision = null, restoredWork = false;
+  let enginePlan = null, enginePlanPending = false, enginePlanError = "", planKey = null, planGeneration = 0, planTimer = null, planController = null;
+  const previewId = createRunId(), runProblems = new Map(), runOutcomes = new Map();
+  let queuedCohort = null;
   const heldRecords = new Map();
   const row = recipe.row;
   const evidence = (id, item) => imageChecks.get(id)?.get(imageIdentity(item));
   const imageView = (id, item, metadata, lookup = evidence) => recipeImageView(item, metadata, lookup(id, item), capturedTargets[0], batch);
-  const notify = () => { if (alive) changed(); };
+  // A count plan belongs to one cohort. Retire it before any synchronous
+  // problem/status publication can expose changed membership, even during Run.
+  const replaceTargets = next => {
+    selectedTargets = freeze(next);
+    planGeneration++; planKey = null; planController?.abort();
+    if (planTimer !== null) clearTimer(planTimer);
+    planTimer = null; enginePlan = next.length ? null : [];
+    enginePlanPending = !!services.plan && next.length > 0; enginePlanError = "";
+    validationCache = null;
+  };
+  const restoreQueuedCohort = () => {
+    if (selectedTargets.length || !queuedCohort) return;
+    replaceTargets(queuedCohort.targets);
+    for (const [id, outcome] of queuedCohort.outcomes) runOutcomes.set(id, outcome);
+  };
+  const notify = () => {
+    if (!alive) return;
+    drainPicks();
+    validationCache = null;
+    // The successful close countdown is still an editable session. A new raw
+    // revision must retain the last issued subjects, not become targetless work.
+    if (!running && queuedCohort && recipe.revision() !== queuedCohort.revision) restoreQueuedCohort();
+    reconcilePlan(); changed();
+  };
   const invalidateClose = () => { closeGeneration++; if (timer !== null) clearTimer(timer); timer = null; };
   const seed = (domain, id, metadata, defaults) => {
     if (!alive) return;
@@ -139,14 +246,15 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
      freeze({ ...entry.metadata, ...snapshotDraft(entry.values), ...(domain === "numeric" ? { increment: increment(entry),
         numbers: Object.fromEntries(["min", "max", "value"].map(name => [name, numberText(entry.values[name])])),
         sliderSafe: [...entry.metadata.clamp, entry.metadata.current, increment(entry), ...["min", "max", "value"].map(name => numberText(entry.values[name]))].filter(value => value !== null).every(sliderNumber) } : {}),
-        ...(domain === "candidates" ? { choices: candidateChoices(entry), candidateViews: entry.values.candidates.map((raw, index) => {
+         ...(domain === "candidates" ? { connectionProblem: entry.metadata.candidateKind === "connection" ? connectionProblem(entry.metadata, catalogues.get(capturedTargets[0].id)?.nodes ?? []) : null, choices: candidateChoices(entry), candidateViews: entry.values.candidates.map((raw, index) => {
           let value = null, error = "";
           try { value = parseExactJson(raw); parseCandidate(entry.metadata, raw); } catch (problem) { error = problem.message; }
           return { raw, index, error, label: raw,
             node: value?.node ?? "", slot: value?.slot ?? "" };
         }) } : {}),
-       ...(domain === "images" ? { images: entry.values.items.map(item => imageView(id, item, entry.metadata)) } : {}),
-       conflict: conflictFor(id) })])));
+        ...(domain === "images" ? { acquiring: pendingPicks().filter(pick => pick.id === id).length, images: entry.values.items.map(item => ({ ...imageView(id, item, entry.metadata),
+          rotatable: item.kind !== "target", rotating: !!rotating.get(id)?.has(imageIdentity(item)) })) } : {}),
+         problems: problems.project(validationProblems()).fields.get(id) ?? [], conflict: conflictFor(id) })])));
   const conflictFor = id => {
     const conflict = conflicts[id];
     if (!conflict) return null;
@@ -156,13 +264,13 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         : location.domain === "candidates" ? entry.values.candidates.map(raw => { try { return parseExactJson(raw); } catch { return undefined; } }) : null;
       if (values?.length && values.every(value => conflict.choices.some(choice => sameJsonValue(choice, value)))) return null;
     }
-    return { ...conflict, host: destination?.source ?? "" };
+    return { ...conflict, host: destination?.source ?? "", parameter: parameter(id), target: targetIdentity(capturedTargets[0]) };
   };
   const unresolvedConflicts = () => locations.filter(entry => conflictFor(entry.id)).length;
-  const catalogueProblem = () => `Couldn't check ${destination?.source ?? capturedTargets[0].host}: ${catalogueError}`;
-  const conflictMessage = count => `Resolve ${count} conflict${count === 1 ? "" : "s"} with ${destination?.source} before running.`;
-  const destinationMessage = () => unchecked.length ? `${unchecked.length} recorded input${unchecked.length === 1 ? " is" : "s are"} unchecked on ${destination?.source}; ComfyUI will validate them at submission.` : "";
-  const dirty = () => acceptedRevision === null ? restoredWork || selectedTargets.length !== capturedTargets.length || recipe.dirty() : recipe.revision() !== acceptedRevision;
+  const catalogueProblem = () => catalogueError;
+  const conflictMessage = count => problemText(variationProblem("destination-conflicts", { phase: "destination", target: targetIdentity(capturedTargets[0]), destination: destination?.source, numbers: { conflicts: count }, names: locations.filter(entry => conflictFor(entry.id)).map(entry => parameter(entry.id).label) }));
+  const destinationMessage = () => unchecked.length ? problemText(variationProblem("destination-unchecked", { severity: "warning", phase: "destination", target: targetIdentity(capturedTargets[0]), destination: destination?.source, names: unchecked.map(id => parameter(id).label) })) : "";
+  const dirty = () => pendingPicks().length > 0 || (acceptedRevision === null ? restoredWork || selectedTargets.length !== capturedTargets.length || recipe.dirty() : recipe.revision() !== acceptedRevision);
   const parseCandidate = (parameter, raw) => parseRecipeCandidate(parameter, raw, catalogues.get(capturedTargets[0].id)?.nodes);
   const candidateChoices = entry => (entry.metadata.options ?? []).map(value => ({ text: stringifyExactJson(value),
     label: stringifyExactJson(value),
@@ -183,8 +291,29 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
   const retireMembership = id => { membershipGenerations.set(id, (membershipGenerations.get(id) ?? 0) + 1); };
   const check = (ticket, target) => {
     if (!owns(ticket)) throw Object.assign(new Error("Operation retired; work was kept"), { stale: true });
-    if (ticket.destination && !sameOrigin(ticket.destination, currentOrigin(ticket.destination.source))) throw Object.assign(new Error(staleSource(ticket.destination.source)), { stale: true });
-    if (!originCurrent(target)) throw Object.assign(new Error(staleSource(target.host)), { stale: true });
+    if (ticket.destination && !sameOrigin(ticket.destination, currentOrigin(ticket.destination.source))) throw Object.assign(problemError(variationProblem("source-retired", { phase: "run", target: targetIdentity(target), source: ticket.destination.source })), { stale: true });
+    if (!originCurrent(target)) throw Object.assign(problemError(variationProblem("source-retired", { phase: "run", target: targetIdentity(target), source: target.host })), { stale: true });
+  };
+  const originalName = item => imageReference(item)?.name ?? item.name;
+  const originalBytes = async item => {
+    if (item.kind === "upload") return item.file;
+    const target = capturedTargets[0], reference = imageReference(item);
+    if (!originCurrent(target)) throw new Error(staleSource(target.host));
+    if (reference) return services.readInput(target.origin, reference.name, reference.root);
+    if (item.kind === "server-path") return services.readPath(item.path);
+    if (item.kind === "archive") return services.readArchive(item);
+    throw new Error("this image cannot be rotated");
+  };
+  const rotatedFile = async (original, degrees) => {
+    const key = imageIdentity(original);
+    if (!rotationSources.has(key)) rotationSources.set(key, { bytes: null, files: new Map() });
+    const source = rotationSources.get(key);
+    if (source.files.has(degrees)) return source.files.get(degrees);
+    source.bytes ??= originalBytes(original).catch(error => { source.bytes = null; throw error; });
+    const file = await services.rotateImage(await source.bytes, degrees, rotatedName(originalName(original), degrees));
+    if (!(file instanceof File) || !file.size || file.name !== rotatedName(originalName(original), degrees)) throw new Error("rotation produced no image");
+    if (!source.files.has(degrees)) { source.files.set(degrees, file); rotations.set(file, { original, degrees }); }
+    return source.files.get(degrees);
   };
   const physicalMatch = (a, b) => validOrigin(a) && validOrigin(b) && a.address === b.address && a.kind === b.kind && a.incarnation === b.incarnation;
   const inspectionQueue = [], pendingInspections = new Set();
@@ -210,11 +339,11 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
           const inspect = item.kind === "server-path" ? services.inspectPath : services.inspectImage;
           const result = await inspect(target.host, item.kind === "server-path" ? item.path : item.file, entry.metadata.current, currentRoot(entry.metadata), target.origin, uploadFamily(item.name, entry.metadata.files));
           if (!alive || !originCurrent(target) || !sameOrigin(result?.origin, target.origin)) throw new Error(staleSource(target.host));
-          if (!/^[a-f0-9]{64}$/.test(result.hash) || !/^[a-f0-9]{64}$/.test(result.currentHash)) throw new Error("Image comparison unavailable");
+           if (!/^[a-f0-9]{64}$/.test(result.hash) || !/^[a-f0-9]{64}$/.test(result.currentHash)) throw problemError(variationProblem("comparison-reply", { phase: "comparison", resource: item.name, parameter: parameter(id), field: "hash/current-image hash" }));
           const existing = result.existing ?? [];
-          if (!Array.isArray(existing) || existing.some(item => !filename(item?.name) || !/^[a-f0-9]{64}$/.test(item.hash))) throw new Error("Upload comparison unavailable");
+           if (!Array.isArray(existing) || existing.some(item => !filename(item?.name) || !/^[a-f0-9]{64}$/.test(item.hash))) throw problemError(variationProblem("comparison-reply", { phase: "comparison", resource: item.name, parameter: parameter(id), field: "collision list" }));
           Object.assign(check, { hash: result.hash, currentHash: result.currentHash, existing });
-        } catch (error) { check.error = error.message; }
+         } catch (error) { const problem = problemFrom(error, { code: "comparison-request", phase: "comparison", target: targetIdentity(target), parameter: parameter(id), resource: item.name, field: "source/reference or comparison response" }); check.error = problemText(problem); check.problem = problem; }
         finally { check.pending = false; pendingInspections.delete(pending); finish(); notify(); }
       });
     }
@@ -222,6 +351,23 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
   };
   const compile = (snapshot, uploadReceipts = null, preview = false, lookup = evidence, target = capturedTargets[0]) =>
     compileRecipe(snapshot, { catalogue: catalogues.get(capturedTargets[0].id), target, batch, lookup, uploadReceipts, confirmedUploads, preview });
+  const validationProblems = () => {
+    if (validationCache) return validationCache;
+    const found = (enginePlan ?? []).flatMap(target => [target.problem, ...(target.notices ?? [])]).filter(problem => problem?.action);
+    if (!catalogueReady) return found;
+    for (const id of unchecked) found.push(variationProblem("destination-unchecked", { severity: "warning", phase: "destination", target: targetIdentity(capturedTargets[0]), parameter: parameter(id), destination: destination?.source, names: [parameter(id).label] }));
+    for (const [id, entry] of recipe.entries("images")) if (entry.values.enabled) {
+      const states = entry.values.items.map(item => imageView(id, item, entry.metadata)), pending = states.filter(item => item.pending);
+      found.push(...states.map(item => item.problem).filter(Boolean));
+      if (pending.length) found.push(variationProblem("images-checking", { severity: "warning", phase: "comparison", parameter: parameter(id), resource: pending[0].name, numbers: { pending: pending.length, selected: states.length } }));
+    }
+    try {
+      const snapshot = captureRows();
+      for (const entry of Object.values(snapshot.numeric)) if (entry.values.enabled) compileNumericOperation(entry.values, entry.metadata, { batch });
+      compile(snapshot, null, true);
+    } catch (error) { if (error.problem) found.push(problemFrom(error, { target: targetIdentity(capturedTargets[0]) })); }
+    return validationCache = found;
+  };
   // A request names both hosts: the image's own and the one it runs on.
   const count = (request, catalogue) => {
     const values = currentValues(catalogue);
@@ -232,16 +378,104 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
   const canClose = ticket => compatible(ticket) && ticket.closeGeneration === closeGeneration && acceptedRevision === ticket.editRevision;
   const publish = value => { result = Object.freeze(value); notify(); };
 
+  const planInput = () => {
+    const encoded = encodeHistoryRecipe(captureRows(), previewId);
+    const resources = encoded.resources.map(resource => {
+      const file = encoded.files.get(resource.id);
+      const check = [...recipe.entries("images")].flatMap(([id, entry]) => entry.values.items.map(item => ({ item, check: evidence(id, item) })))
+        .find(record => file ? record.item.file === file : resource.kind === "server-path" && record.item.path === resource.path)?.check;
+      return check?.hash ? { ...resource, hash: check.hash } : resource;
+    });
+    const targets = selectedTargets.map(target => ({ id: target.id, host: target.host, filename: target.filename, origin: target.origin,
+      ...(catalogues.get(target.id)?.context ?? target.context ? { context: catalogues.get(target.id)?.context ?? target.context } : {}),
+      ...(target.historyRef ? { historyRef: target.historyRef } : {}) }));
+    return { targets, cohortMode: batch ? "bulk" : "single", recipe: encoded.recipe, resources, ...(destination ? { destination } : {}) };
+  };
+  function reconcilePlan() {
+    if (!services.plan || !catalogueReady || destinationPending || catalogueError !== null || running) return;
+    if (!selectedTargets.length) { enginePlan = []; enginePlanPending = false; return; }
+    const selectedImages = [...recipe.entries("images")].filter(([, entry]) => entry.values.enabled)
+      .flatMap(([id, entry]) => entry.values.items.map(item => imageView(id, item, entry.metadata)));
+    if (pendingPicks(true).length || selectedImages.some(item => item.pending || item.error)) {
+      planGeneration++; planKey = null; planController?.abort(); if (planTimer !== null) clearTimer(planTimer);
+      planTimer = null; enginePlan = null; enginePlanError = selectedImages.find(item => item.error)?.error ?? ""; enginePlanPending = !enginePlanError;
+      return;
+    }
+    let input, key;
+    try { input = planInput(); key = stringifyExactJson(input); }
+    catch (error) { enginePlanError = problemText(problemFrom(error, { code: "plan-input", phase: "plan", numbers: { images: selectedTargets.length } })); enginePlanPending = false; return; }
+    if (key === planKey) return;
+    planKey = key; const generation = ++planGeneration;
+    planController?.abort(); if (planTimer !== null) clearTimer(planTimer);
+    enginePlanPending = true; enginePlanError = ""; enginePlan = null;
+    planController = new AbortController();
+    planTimer = setTimer(async () => {
+      planTimer = null;
+      try {
+        const planned = await services.plan(input, planController.signal);
+        if (!alive || generation !== planGeneration) return;
+        if (!Array.isArray(planned) || planned.length !== input.targets.length || planned.some((target, index) => !target || target.index !== index ||
+          !Number.isSafeInteger(target.count) || target.count < 0 || (target.problem ?
+           typeof target.problem.message !== "string" || !target.problem.message.trim() || target.count !== 0 && target.problem.code !== "too-many" : target.count <= 0))) throw Object.assign(new Error("target length, index, count or problem shape mismatch"), { code: "plan-invalid-reply" });
+        enginePlan = freeze(snapshotDraft(planned));
+      } catch (error) { if (alive && generation === planGeneration) enginePlanError = problemText(variationProblem(error.code === "plan-invalid-reply" ? error.code : "plan-failed", { phase: "plan", detail: error.message, numbers: { images: input.targets.length } })); }
+      finally { if (alive && generation === planGeneration) { enginePlanPending = false; validationCache = null; changed(); } }
+    }, 150);
+  }
+  const cohortPresentation = () => planPresentation(enginePlan, selectedTargets, { pending: enginePlanPending, error: enginePlanError });
+  const withCohort = preview => {
+    if (!services.plan) return preview;
+    const presentation = cohortPresentation(), { n } = presentation;
+    const blocked = unresolvedConflicts();
+    if (preview.status === "invalid") {
+      Object.assign(presentation, { status: "invalid", message: preview.message, problemMessage: preview.message });
+    } else if (preview.status === "checking" && preview.message?.startsWith("Checking bytes")) {
+      presentation.message = preview.message;
+    } else if (blocked) {
+      const message = conflictMessage(blocked);
+      Object.assign(presentation, { status: "conflict", message, problemMessage: message });
+    }
+    const times = presentation.admitted.map(target => {
+      const duration = generationTimes.get(selectedTargets[target.index]?.id);
+      return knownGenerationTime(duration) ? duration * target.count : null;
+    });
+    const missingTimes = presentation.admitted.filter((_, index) => !knownGenerationTime(times[index]));
+    if (missingTimes.length && !enginePlanPending && !problems.read().some(problem => problem.code === "time-unavailable")) presentation.notices.push(variationProblem("time-unavailable", { severity: "warning", phase: "metadata",
+      names: missingTimes.map(target => selectedTargets[target.index]?.filename), numbers: { missing: missingTimes.length, total: presentation.admitted.length }, detail: "missing metadata or unsupported computed duration" }));
+    // The shown count is settled unless the debounced engine plan is still due.
+    return { ...preview, ...presentation, exact: n !== null, busy: preview.status !== "invalid" && (presentation.pending || !!preview.busy),
+      timeEstimate: estimateGenerationTime(n > 0 ? 1 : null, times) };
+  };
+  const canRun = () => !pendingPicks(true).length && (!services.plan || catalogueReady && catalogueError === null && !destinationPending && !enginePlanPending && !enginePlanError && enginePlan?.some(target => !target.problem && target.count > 0)) &&
+    !["invalid", "failed", "conflict"].includes(editor.preview().status);
+
   seed("naming", "root", {}, { prefix: "", suffix: "" });
-  return {
+  const editor = {
     rows: view,
     revision: recipe.revision,
     targets: () => selectedTargets,
+    targetProblem(id) {
+      const unavailable = selectedTargets.find(target => target.id === id && target.unavailable);
+      if (unavailable) return variationProblem("saved-unavailable", { phase: "history", target: targetIdentity(unavailable), numbers: { unavailable: 1, total: 1 }, names: [`${unavailable.filename}: ${unavailable.unavailable}`] });
+      const retained = runProblems.get(id);
+      return retained?.revision === recipe.revision() ? retained.problem : cohortPresentation().problems.get(id) ??
+        problems.read().find(problem => problem.target?.id === id) ?? (enginePlan ?? []).find(target => selectedTargets[target.index]?.id === id)?.notices?.[0] ?? null;
+    },
+    targetOutcome: id => runOutcomes.get(id) ?? null,
+    // The destination summary already names every unchecked input once; cards
+    // keep their own one-input projection without repeating it in the status.
+    problems: () => [...problems.read(), ...validationProblems().filter(problem => problem.code !== "destination-unchecked")],
+    reportProblem: (key, problem) => problems.report(key, problem),
+    clearProblem: key => problems.clear(key),
+    canRun,
     destination: () => destination,
     setDestination(origin) {
       if (!alive || deciding || running || !validOrigin(origin) || origin.kind !== "comfy") return false;
       if (sameOrigin(origin, destination)) return false;
+      restoreQueuedCohort();
       destination = freeze(snapshotDraft(origin)); conflicts = {}; unchecked = []; destinationPending = true; catalogueError = null;
+      problems.clear("catalogue"); problems.clearPrefix("schema:");
+      planGeneration++; planKey = null; enginePlan = null; enginePlanPending = true; planController?.abort(); runProblems.clear(); runOutcomes.clear();
       invalidateClose(); notify(); return true;
     },
     resolveConflict(id, value) {
@@ -253,8 +487,10 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     },
     generationTime: id => selectedTargets.some(target => target.id === id && originCurrent(target)) ? generationTimes.get(id) ?? null : null,
     removeTarget(id) {
-      if (!alive || deciding || running || selectedTargets.length <= 1 || !selectedTargets.some(target => target.id === id)) return false;
-      selectedTargets = freeze(selectedTargets.filter(target => target.id !== id));
+      if (!alive || deciding || running || !selectedTargets.some(target => target.id === id)) return false;
+      if (selectedTargets.length <= 1) { report("last-target", "last-target", { phase: "selection", target: targetIdentity(selectedTargets[0]) }); return false; }
+      replaceTargets(selectedTargets.filter(target => target.id !== id));
+      problems.clear("timing");
       recipe.edited(); invalidateClose(); notify(); return true;
     },
     loadGenerationTimes() {
@@ -263,22 +499,31 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       timingTask = Promise.allSettled(capturedTargets.map(async target => {
         if (knownGenerationTime(generationTimes.get(target.id)) || !services.generationTime || !originCurrent(target) || target.historyRef && !target.hash) return;
         const record = await services.generationTime(target, { signal: timingController.signal });
-        if (!alive || !selectedTargets.includes(target) || !originCurrent(target) || record?.name !== target.filename || !/^[a-f0-9]{64}$/.test(record.hash ?? "") ||
-            target.hash && record.hash !== target.hash || !knownGenerationTime(record.generationTimeMs)) return;
+        if (!alive || !selectedTargets.includes(target) || !originCurrent(target)) return;
+        if (record?.name !== target.filename || !/^[a-f0-9]{64}$/.test(record.hash ?? "") || target.hash && record.hash !== target.hash || !knownGenerationTime(record.generationTimeMs)) return "missing";
         generationTimes.set(target.id, record.generationTimeMs); notify();
-      })).then(() => {});
+      })).then(results => {
+        if (!alive) return;
+        const eligible = capturedTargets.filter((target, index) => selectedTargets.includes(target) && originCurrent(target) && results[index].status === "rejected" ||
+          selectedTargets.includes(target) && originCurrent(target) && results[index].status === "fulfilled" && results[index].value === "missing");
+        const missing = eligible.filter(target => !knownGenerationTime(generationTimes.get(target.id)));
+        if (missing.length) report("timing", "time-unavailable", { severity: "warning", phase: "metadata",
+          numbers: { missing: missing.length, total: selectedTargets.length }, names: missing.map(target => target.filename),
+          detail: results.find(result => result.status === "rejected")?.reason?.message ?? "missing or unsupported duration metadata" });
+        else problems.clear("timing");
+      });
       return timingTask;
     },
     async planRecall(saved) {
       const revision = recipe.revision();
       if (!alive || deciding || running) throw new Error("Finish the current action before recalling history");
       const cohort = [];
-      for (const target of selectedTargets) {
+      for (const target of selectedTargets.length ? selectedTargets : queuedCohort?.targets ?? selectedTargets) {
         if (!originCurrent(target)) throw new Error(staleSource(target.host));
         const data = catalogues.get(target.id) ?? await services.probe(target);
         if (!originCurrent(target)) throw new Error(staleSource(target.host));
         if (!alive || deciding || running || recipe.revision() !== revision) throw new Error("Editor changed while reading history; choose it again");
-        cohort.push(data);
+        cohort.push({ ...data, filename: target.filename });
       }
       const plan = planHistoryOverlay(saved, captureRows(), cohort, batch ? "bulk" : "single");
       return { ...plan, revision, id: saved.id, leaseId: saved.leaseId, record: saved };
@@ -297,7 +542,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       for (const target of record.targets) catalogues.set(target.id, freeze(snapshotDraft({ ...target.catalogue, context: target.context })));
       // Archived catalogues are readonly facts, not fresh authority. The explicit
       // opening's matched contexts fence Run independently, including offline use.
-      this.installCatalogue({ ...record.targets[0].catalogue, context: record.targets[0].context }, true);
+      this.installCatalogue({ ...record.targets[0].catalogue, context: record.targets[0].context }, true, true);
       recipe.restore(decodeHistoryRecipe(record));
       restoredWork = true; heldRecords.set(record.leaseId, record); notify();
     },
@@ -330,27 +575,40 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     naming: name => row("naming", "root").values[name],
     dirty,
     running: () => running,
+    submission: () => submission,
     result: () => {
       if (!result?.adopted || !dirty()) return result;
       return { ...result, state: "kept", reason: "Newer edits have been kept.", text: `submitted ${result.submitted}/${result.total} — newer edits have been kept` };
     },
     ready: () => catalogueReady,
     sourceProblem() { const target = selectedTargets.find(target => !originCurrent(target)); return target ? staleSource(target.host) : null; },
-    sourceInputs(origin, root = "input") {
+    sourceInputs(origin, root = "input", filters = {}) {
       const record = sourceRecord(inputCatalogues, origin, null, root);
       if (!record) return { files: [], pending: false, error: "" };
       // Readonly discovery reprojects retained facts through the live injected
       // authority. It never edits the recipe or the independent input evidence.
       let files = record.files;
+      let visible = files.length;
+      const markers = new Map();
       if (root === "output") {
-        const eligible = record.entries.filter(entry => services.outputVisible
-          ? services.outputVisible(origin, entry) : judgmentVisible(entry.judgment)).map(entry => entry.name);
+        visible = 0;
+        const eligible = record.entries.filter(entry => {
+          const candidate = services.outputCandidate?.(origin, entry) ?? { judgment: entry.judgment, visible: judgmentVisible(entry.judgment) };
+          if (!candidate.visible) return false;
+          visible++;
+          if (!matchesPickerJudgments(candidate.judgment, filters)) return false;
+          markers.set(entry.name, judgmentMarkers(candidate.judgment));
+          return true;
+        }).map(entry => entry.name);
         // Unrelated recipe/status changes must not reset search/virtual focus.
         if (!record.eligible || record.eligible.length !== eligible.length || eligible.some((name, i) => record.eligible[i] !== name))
           record.eligible = Object.freeze(eligible);
         files = record.eligible;
       }
-      return { files, pending: record.pending, error: record.error, loaded: record.loaded };
+      const listed = record.listed ?? visible, invalid = record.invalid ?? 0, hidden = Math.max(0, listed - invalid - visible);
+      const notices = hidden || invalid ? [variationProblem("listing-filtered", { severity: "warning", phase: "acquisition", source: origin.source, root,
+        numbers: { visible, listed, hidden, invalid } })] : [];
+      return { files, markers, pending: record.pending, error: record.error, loaded: record.loaded, notices };
     },
     async loadSourceInputs(origin, retry = false, root = "input") {
       if (!alive || !["input", "output"].includes(root) || !validOrigin(origin) || !sameOrigin(origin, currentOrigin(origin.source))) return;
@@ -361,14 +619,15 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       try {
         const data = await services.inputList(origin.source, origin, root);
         if (!ownsRecord()) return;
-        if (!sameOrigin(data?.origin, origin)) throw new Error(staleSource(origin.source));
-        if (data.root !== root || !Array.isArray(data.files)) throw new Error("Source-bound image catalogue unavailable");
+        if (!sameOrigin(data?.origin, origin)) throw problemError(variationProblem("source-list-shape", { phase: "acquisition", source: origin.source, root, detail: "source origin mismatch" }));
+        if (data.root !== root || !Array.isArray(data.files)) throw problemError(variationProblem("source-list-shape", { phase: "acquisition", source: origin.source, root, detail: "root or file list mismatch" }));
         if (root === "output") record.entries = freeze(data.files.map(file => typeof file === "string" ? { name: file, judgment: null }
           : { name: file.name, judgment: snapshotDraft(file.judgment ?? null) }).filter(entry => resourceName(entry.name)));
         else record.files = data.files.map(file => typeof file === "string" ? file : file.name).filter(resourceName);
+        record.listed = data.files.length; record.invalid = data.files.length - (root === "output" ? record.entries.length : record.files.length);
         record.loaded = true;
         if (root === "input" && sameOrigin(origin, capturedTargets[0].origin)) this.installInputs(data);
-      } catch (error) { if (ownsRecord()) record.error = `${origin.source}: ${error.message}`; }
+      } catch (error) { if (ownsRecord()) record.error = problemText(problemFrom(error, { code: "source-list", phase: "acquisition", source: origin.source, root })); }
       finally {
         if (!ownsRecord()) return;
         record.pending = false;
@@ -398,14 +657,18 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         // The resource port retains its full raw name. Uploads have their own
         // flat namespace; the editor owns that leaf-named File, not the API.
         return name.includes("/") ? new File([resource], name.split("/").at(-1), { type: resource.type, lastModified: resource.lastModified }) : resource;
-      }, ownsRead);
+      }, ownsRead, { source: origin.source, root });
     },
     // A service whose configuration changed retires its cached Files and any
     // read still in flight; images already in a set keep their own File.
-    retirePexelsService(service) { if (pexelsFiles.delete(service)) notify(); },
+    retirePexelsService(service, name = service) {
+      for (const [photo, cached] of pexelsFiles.get(service) ?? []) for (const [id] of cached.wanted)
+        report(`acquire:${id}`, "acquisition-retired", { phase: "acquisition", parameter: parameter(id), resource: `Photo ${photo}`, source: name });
+      if (pexelsFiles.delete(service)) notify();
+    },
     pexelsState(id, service, photo) { return cachedFileState(id, pexelsFiles.get(service)?.get(photo)); },
     // A chosen Pexels photo is an ordinary uploaded image once its bytes arrive.
-    togglePexels(id, service, photo, url) {
+    togglePexels(id, service, photo, url, name = service) {
       if (!alive || deciding || typeof service !== "string" || typeof photo !== "string" || typeof url !== "string" || !row("images", id) || !originCurrent(capturedTargets[0])) return false;
       if (!pexelsFiles.has(service)) pexelsFiles.set(service, new Map());
       const files = pexelsFiles.get(service);
@@ -413,14 +676,22 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         const file = await services.readPexelsPhoto(service, photo, url);
         if (!(file instanceof File) || !file.size) throw new Error("Invalid photo");
         return file;
-      }, () => alive && pexelsFiles.get(service) === files);
+      }, () => alive && pexelsFiles.get(service) === files, { source: name, root: "photo" });
     },
     // The server's own reason when it gave one; never the request path.
-    catalogueFailure(error) { if (!alive) return; catalogueError = String(error?.detail || (error?.status ? `HTTP ${error.status}` : error?.message ?? error)); result = null; notify(); },
+    catalogueFailure(error) {
+      if (!alive) return;
+      const context = { phase: "catalogue", target: targetIdentity(capturedTargets[0]), destination: destination?.source ?? capturedTargets[0].host };
+      const problem = error?.problem ? problemFrom(error, context) : variationProblem("catalogue-read", { ...context, detail: String(error?.detail || (error?.status ? `HTTP ${error.status}` : error?.message ?? error)) });
+      problems.report("catalogue", problem);
+      catalogueError = problemText(problem); result = null; notify();
+    },
     // Ask the same source again after a failed catalogue request.
     retryCatalogue() {
-      if (!alive || running || catalogueError === null) return false;
+      if (!alive || running || catalogueError === null && !enginePlanError) return false;
       catalogueError = null; result = null; if (destination) destinationPending = true;
+      problems.clear("catalogue");
+      enginePlanError = ""; planKey = null;
       notify(); return true;
     },
     invalidateClose,
@@ -428,6 +699,7 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     edit(domain, id, name, value) {
       if (!alive || deciding) return false;
       write(domain, id, name, value);
+      problems.clear(`edit:${id}`); problems.clear(`acquire:${id}`); problems.clear(`rotate:${id}`); problems.clear("last-target");
       if (domain === "images" && name === "items") inspectItems(id);
       recipe.edited(); invalidateClose(); notify(); return true;
     },
@@ -436,24 +708,39 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       if (!entry) throw new Error("Unknown image row");
       // Unlike immutable Files, a removed disk path may now contain new bytes.
       for (const item of items) if (item.kind === "server-path" && !entry.values.items.some(other => sameImage(item, other))) imageChecks.get(id)?.delete(imageIdentity(item));
-      return this.edit("images", id, "items", mergeImages(entry.values.items, items, index));
+      const merged = mergeImages(entry.values.items, items, index), added = merged.length - entry.values.items.length;
+      const result = this.edit("images", id, "items", merged);
+      if (items.length > added) report(`merge:${id}`, "images-merged", { severity: "warning", phase: "acquisition", parameter: parameter(id),
+        numbers: { added, listed: items.length, duplicates: items.length - added } });
+      else problems.clear(`merge:${id}`);
+      return result;
     },
-    dropImages(id, resources, accepts) {
+    dropImages(id, resources, accepts, index) {
       const result = classifyImageFiles(resources, accepts);
-      if (result.images.length) { this.setEnabled(id, true); this.addImages(id, result.images.map(uploadImage)); }
+      if (result.images.length) { this.setEnabled(id, true); this.addImages(id, result.images.map(uploadImage), index); }
+      if (result.skipped || result.folders) report(`drop:${id}`, "drop-skipped", { severity: "warning", phase: "acquisition", parameter: parameter(id),
+        numbers: { added: result.images.length, skipped: result.skipped, folders: result.folders }, names: result.names });
+      if (result.unreadable) report(`drop-unreadable:${id}`, "drop-unreadable", { severity: "warning", phase: "acquisition", parameter: parameter(id), numbers: { unreadable: result.unreadable } });
       return result.status;
     },
     async addFolder(id, path) {
-      if (!alive || deciding || running) throw new Error("Finish the current action before adding a folder");
+      const refuse = detail => problemError(variationProblem("folder-not-added", { phase: "acquisition", parameter: parameter(id), path, detail }));
+      if (!alive || deciding || running) throw refuse(`${running ? "a Run submission" : "a confirmation"} is still in progress; finish the current action before adding a folder`);
       const target = capturedTargets[0];
-      if (!originCurrent(target)) throw new Error(staleSource(target.host));
+      if (!originCurrent(target)) throw refuse(staleSource(target.host).replace(/[.\s]+$/, ""));
       const ticket = membershipTicket(id);
-      const result = await services.listFolder(path);
-      if (!originCurrent(target)) throw new Error(staleSource(target.host));
-      if (running || !admitsMembership(ticket)) throw new Error("The editor changed while reading the folder. Add it again when ready.");
-      if (!validImageSet(result?.items) || result.items.some(item => item.kind !== "server-path")) throw new Error("Invalid folder image listing");
+      let result;
+      try { result = await services.listFolder(path); }
+      catch (error) { throw problemError(problemFrom(error, { code: "folder-not-added", phase: "acquisition", parameter: parameter(id), path })); }
+      if (!originCurrent(target)) throw refuse(staleSource(target.host).replace(/[.\s]+$/, ""));
+      if (running || !admitsMembership(ticket)) throw refuse("The editor changed while reading the folder. Add it again when ready");
+      if (!validImageSet(result?.items) || result.items.some(item => item.kind !== "server-path")) throw refuse("Invalid folder image listing returned by the engine");
+      const before = row("images", id).values.items.length;
       this.addImages(id, result.items);
-      return { count: result.items.length };
+      const added = row("images", id).values.items.length - before;
+      if (result.skipped?.links || result.skipped?.other) report(`folder:${id}`, "folder-skipped", { severity: "warning", phase: "acquisition", parameter: parameter(id), path,
+        numbers: { images: added, ...result.skipped } });
+      return { count: added, listed: result.items.length, skipped: result.skipped, path: result.path ?? path };
     },
     removeImage(id, item) {
       return this.edit("images", id, "items", row("images", id).values.items.filter(other => !sameImage(item, other)));
@@ -461,6 +748,40 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     toggleTargetImage(id) {
       const item = { kind: "target" };
       return row("images", id).values.items.some(other => sameImage(item, other)) ? this.removeImage(id, item) : this.addImages(id, [item]);
+    },
+    // One quarter turn of a picked image, composed from its original bytes.
+    // Turns requested while one is encoding join it; the result replaces the
+    // tile in place, and a full turn restores the exact original item.
+    rotateImage(id, shown, direction) {
+      const entry = row("images", id), item = shown && entry?.values.items.find(other => sameImage(shown, other));
+      if (!alive || deciding || !["cw", "ccw"].includes(direction) || !item || item.kind === "target") return Promise.resolve(false);
+      const pending = rotating.get(id) ?? new Map(), key = imageIdentity(item);
+      rotating.set(id, pending);
+      if (pending.has(key)) { const job = pending.get(key); job.degrees = composeRotation(job.degrees, direction); return job.done; }
+      const recorded = item.kind === "upload" ? rotations.get(item.file) : null, original = recorded?.original ?? item;
+      const job = { degrees: composeRotation(recorded?.degrees ?? 0, direction) }, ticket = membershipTicket(id);
+      pending.set(key, job); invalidateClose(); notify();
+      job.done = (async () => {
+        try {
+          let file = null, degrees;
+          do { degrees = job.degrees; file = degrees ? await rotatedFile(original, degrees) : null; } while (job.degrees !== degrees);
+          if (!alive) return false;
+          if (!admitsMembership(ticket)) throw new Error("the editor changed while rotating");
+          const items = row("images", id).values.items;
+          if (!items.some(other => sameImage(item, other))) return false;
+          const replacement = file ? uploadImage(file) : original;
+          const next = items.filter(other => sameImage(item, other) || !sameImage(replacement, other));
+          next[next.findIndex(other => sameImage(item, other))] = replacement;
+          return this.edit("images", id, "items", next);
+        } catch (error) {
+          if (alive) report(`rotate:${id}`, "rotation-failed", { phase: "acquisition", parameter: parameter(id), resource: originalName(original), detail: error.message });
+          return false;
+        } finally {
+          pending.delete(key); if (!pending.size) rotating.delete(id);
+          notify();
+        }
+      })();
+      return job.done;
     },
     moveImage(id, item, index) {
       const items = row("images", id).values.items, ordered = moveRecipeImage(items, item, index);
@@ -480,17 +801,33 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       write("texts", id, "tpl", { ...entry.values.tpl, [label]: value });
       recipe.edited(); invalidateClose(); notify(); return true;
     },
-    installCatalogue(data, archived = false) {
+    installCatalogue(data, archived = false, restoring = false) {
       if (!alive) return;
       const target = capturedTargets[0];
       if (!archived && (!validContext(data?.context) || !sameOrigin(data.context.origin, target.origin))) {
-        publish({ text: staleSource(target.host), ok: false, state: "unavailable" }); return;
+        const problem = report("catalogue", "catalogue-stale", { phase: "catalogue", target: targetIdentity(target), source: target.host });
+        catalogueError = problemText(problem); notify(); return;
       }
-      if (data.destination && !sameOrigin(data.destination.origin, destination)) return;
+      if (!restoring && data.destination && !sameOrigin(data.destination.origin, destination)) {
+        const problem = report("catalogue", "catalogue-destination", { phase: "catalogue", actual: data.destination.origin?.source ?? "unknown destination", expected: destination?.source ?? "none" });
+        catalogueError = problemText(problem); notify(); return;
+      }
       parameterIndex(allParameters(data)); parameterIndex(catalogueParams(data));
+      // Validate the whole incoming catalogue before publishing any defaults.
+      for (const p of allParameters(data)) {
+        const domain = data.parameters ? editorDomain(p) : ["numeric", "images", "enums", "texts"][["params", "stringParams", "enumParams", "textParams"].findIndex(key => data[key]?.some(other => other.id === p.id))];
+        if (!ROW_STRATEGIES[domain]) throw new Error(`Unsupported parameter editor: ${p.id}`);
+        const initialized = ROW_STRATEGIES[domain].initialize(p, batch);
+        freeze(snapshotDraft({ ...p, ...initialized.metadata }));
+        for (const [name, value] of Object.entries(initialized.defaults)) if (!validValue(recipeField(domain, name).type, value)) throw new Error(`Invalid default: ${domain}.${name}`);
+      }
       catalogues.set(target.id, freeze(snapshotDraft({ ...data, context: data.context ?? catalogues.get(target.id)?.context ?? null })));
-      if (data.destination) { conflicts = snapshotDraft(data.destination.conflicts ?? {}); unchecked = [...(data.destination.unchecked ?? [])]; destinationPending = false; }
-      catalogueError = null;
+      if (data.destination && (!archived || sameOrigin(data.destination.origin, destination))) {
+        conflicts = snapshotDraft(data.destination.conflicts ?? {}); unchecked = [...(data.destination.unchecked ?? [])]; destinationPending = restoring && !!destination;
+      }
+      catalogueError = null; problems.clear("catalogue");
+      problems.clearPrefix("schema:");
+       for (const problem of data.problems ?? []) problems.report(`schema:${problem.parameter?.id}`, problem);
       const legacy = new Map([...["params", "stringParams", "enumParams", "textParams"].flatMap((key, index) => (data[key] ?? []).map(parameter => [parameter.id, ["numeric", "images", "enums", "texts"][index]]))]);
       const names = new Map();
       for (const parameter of allParameters(data)) { const name = `${parameter.title ?? parameter.type}.${parameter.key}`; names.set(name, (names.get(name) ?? 0) + 1); }
@@ -514,14 +851,16 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       for (const [id] of recipe.entries("images")) { seed("images", id, { files, filesReady: true }, {}); inspectItems(id); }
     },
     preview() {
-      const unavailable = (status, message) => ({ n: null, display: "—", fullCount: message, perImage: 0,
+      const unavailable = (status, message) => ({ n: null, display: "—", fullCount: message, perImage: 0, busy: status === "reading",
         anyEnabled: false, exact: false, status, message, breakdown: "", axes: [], excluded: 0, naming: { example: "", complete: false }, timeEstimate: estimateGenerationTime(null, []) });
+      if (services.runDestinations && !services.runDestinations().some(origin => origin.source === (destination?.source ?? capturedTargets[0].host))) return unavailable("failed", problemText(variationProblem("no-destination", { phase: "destination" })));
       if (catalogueError !== null) return unavailable("failed", catalogueProblem());
-      if (!catalogueReady) return unavailable("reading", "Reading workflow…");
-      if (destinationPending) return unavailable("reading", `Checking ${destination.source}…`);
+      if (!catalogueReady) return unavailable("reading", problemText(variationProblem("workflow-pending", { phase: "catalogue", target: targetIdentity(capturedTargets[0]) })));
+      if (destinationPending) return unavailable("reading", problemText(variationProblem("destination-pending", { phase: "destination", destination: destination.source, numbers: { images: selectedTargets.length } })));
+      if (pendingPicks(true).length) return unavailable("reading", `Loading ${pendingPicks(true).length} selected images. Nothing will be sent until they are ready.`);
       const snapshot = captureRows(), first = catalogues.get(capturedTargets[0].id);
       for (const [id, entry] of Object.entries(snapshot.numeric)) if (entry.values.enabled && entry.values.mode === "range" && increment(entry) === null) {
-        return unavailable("invalid", `${entry.metadata.label}: enter a valid positive Step. Your text is kept.`);
+        return unavailable("invalid", problemText(variationProblem("numeric-step", { phase: "compile", target: targetIdentity(capturedTargets[0]), parameter: parameter(id), field: "Step", value: entry.values.rawIncrement, numbers: { minimum: entry.metadata.minIncrement } })));
       }
       try {
         const compiled = compile(snapshot, null, true), payload = compiled.estimate;
@@ -561,9 +900,11 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         const parameters = namingParameters(first), aliases = parameterAliases(parameters);
         const basename = capturedTargets[0].filename.split("/").pop().replace(/\.[^.]+$/, "");
         const source = first.outputNaming ?? { directory: "", sourceStem: basename };
-        const projection = variationOutputName(source, { ...payload, ranges }, sample, values, aliases, parameters, { sameHost });
-        const naming = { complete: projection.complete,
-          example: projection.value.replace(/\0pending-\d+/g, "[upload name pending]"),
+        const projection = variationOutputName(source, { ...payload, ranges }, previewRecipeNaming(sample, compiled), values, aliases, parameters, { sameHost });
+         const naming = { complete: projection.complete,
+           notices: projection.notices.map(problem => problemFrom({ problem }, { target: targetIdentity(capturedTargets[0]), parameter: { id: "root", label: "Output names" } })),
+           problems: projection.problems.map(problem => problemFrom({ problem }, { target: targetIdentity(capturedTargets[0]) })),
+           example: projection.value,
           help: "Representative first output; upload collision names and ComfyUI's added counter may differ." };
         const factors = [...axes].sort((a, b) => (a.kind !== "images") - (b.kind !== "images")).map(axis =>
           `${axis.count.toLocaleString("en-US")} ${axis.kind === "images" ? `input image${axis.count === 1 ? "" : "s"}` : `${axis.name} value${axis.count === 1 ? "" : "s"}`}`);
@@ -571,34 +912,36 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
           + (excluded ? ` · ${excluded} unchanged combination${excluded === 1 ? "" : "s"} excluded` : "")
           + (batch ? ` · workflow estimate × ${selectedTargets.length} target image${selectedTargets.length === 1 ? "" : "s"}` : "");
         let status = !naming.complete || error ? "invalid" : pending ? "checking" : "ready";
-        let message = !naming.complete ? "Unresolved naming token: check Prefix and Suffix." : error ? `Image comparison failed: ${error}`
-          : pending ? "Checking images…" : !n ? "Choose a different value, image or destination to create variations."
-          : !safe ? "Estimate exceeds safe integer precision; the full value is approximate."
+        let message = !naming.complete ? naming.problems.map(problemText).join("\n") : error ? `Image comparison failed: ${error}`
+          : pending ? problemText(validationProblems().find(problem => problem.code === "images-checking")) : !n ? "Choose a different value, image or destination to create variations."
+          : !safe ? problemText(variationProblem("estimate-unsafe", { phase: "plan", numbers: { count: n } }))
           : batch ? "Estimated from the opening workflow; each remaining target is checked before submission."
           : n > 100 ? "Large sweep: this many jobs will be queued. The engine validates its existing per-run limit." : "";
         const blocked = unresolvedConflicts();
         if (blocked && status !== "invalid") { status = "conflict"; message = conflictMessage(blocked); }
         const timeEstimate = estimateGenerationTime(status === "invalid" ? null : perImage,
           selectedTargets.map(target => originCurrent(target) ? generationTimes.get(target.id) : null));
-        return { n, perImage, anyEnabled: axes.length > 0 || !sameHost, exact: exact && naming.complete, status, message,
+        return withCohort({ n, perImage, anyEnabled: axes.length > 0 || !sameHost, exact: exact && naming.complete, status, message, busy: pending && status !== "invalid",
           unchecked: [...unchecked], uncheckedMessage: destinationMessage(), axes, excluded, breakdown, naming, timeEstimate,
           display: n >= 1e6 ? n < 1e15 ? new Intl.NumberFormat("en-US", { notation: "compact", maximumSignificantDigits: 4 }).format(n)
             : n.toExponential(2).replace("e+", " × 10^") : n.toLocaleString("en-US"),
-          fullCount: `${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}${exact ? " variations" : " variations (estimate)"}` };
+          fullCount: `${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}${exact ? " variations" : " variations (estimate)"}` });
       } catch (error) {
         // A value the destination lacks is a conflict, not a recipe mistake.
         const blocked = unresolvedConflicts();
-        return { ...unavailable(blocked ? "conflict" : "invalid", blocked ? conflictMessage(blocked) : error.message),
-          unchecked: [...unchecked], uncheckedMessage: destinationMessage() };
+        return withCohort({ ...unavailable(blocked ? "conflict" : "invalid", blocked ? conflictMessage(blocked) : problemText(problemFrom(error, { target: targetIdentity(capturedTargets[0]) }))),
+          unchecked: [...unchecked], uncheckedMessage: destinationMessage() });
       }
     },
     async run() {
       if (!alive) return { status: "stale" };
-      if (running || deciding) return { status: "busy" };
+      if (running || deciding) { report("busy", "busy", { phase: "run", detail: running ? "submission" : "confirmation" }); return { status: "busy" }; }
+      problems.clear("busy");
+      if (pendingPicks(true).length) { publish({ text: "Selected images are still loading. Nothing was sent.", ok: false, state: "unavailable" }); return { status: "invalid" }; }
       if (catalogueError !== null) { publish({ text: `${catalogueProblem()} Nothing was sent.`, ok: false, state: "unavailable" }); return { status: "invalid" }; }
       if (!catalogueReady) { publish({ text: "Inspecting source context; your edits have been kept.", ok: false, state: "unavailable" }); return { status: "invalid" }; }
       if (destinationPending) { publish({ text: `Still checking ${destination.source}; nothing was sent.`, ok: false, state: "unavailable" }); return { status: "invalid" }; }
-      if (unresolvedConflicts()) { publish({ text: `${conflictMessage(unresolvedConflicts())} Nothing was sent.`, ok: false, state: "invalid" }); return { status: "invalid" }; }
+      if (services.plan ? !canRun() : unresolvedConflicts()) { publish({ text: `${services.plan ? withCohort({}).message || "No image has work to submit." : conflictMessage(unresolvedConflicts())} Nothing was sent.`, ok: false, state: "invalid" }); return { status: "invalid" }; }
       invalidateClose();
       const ticket = Object.freeze({ runId: createRunId(), editRevision: recipe.revision(), closeGeneration, snapshot: freeze(captureRows()), targets: selectedTargets, cohortMode: batch ? "bulk" : "single", destination });
       // Retain the captured inspection handles while they settle. Removing and
@@ -608,29 +951,48 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
       const operation = { compiled: null };
       active = ticket;
       let submitted = 0, total = 0, countsComplete = true, uncertain = false;
-      const failures = [], uploads = new Map();
+      const failures = [], uploads = new Map(), leftovers = new Map();
       const effects = { uploads: [], targets: [] };
       // A Run ends in one transition: its outcome is shown together with the
       // end of running, after the saved-run record is finished.
       let outcome = null, show = false, closable = false;
-      running = true; result = null; notify();
+      running = true; submission = null; result = null; queuedCohort = null; runOutcomes.clear(); notify();
       try {
         const saved = services.history ? await services.history.capture(ticket,
           new Map([...catalogues].map(([id, catalogue]) => [id, catalogue.context])), target => check(ticket, target)) : null;
+        if (saved && owns(ticket) && services.history.progress) {
+          submission = saved.submission ?? { sent: 0, total: saved.summary?.total ?? null };
+          stopProgress = observeSubmission({ read: signal => services.history.progress(ticket.runId, signal), setTimer, clearTimer,
+            failure: (error, value) => { if (owns(ticket)) report("progress", "progress-unavailable", { severity: "warning", phase: "submission", detail: error.message, numbers: value ?? {} }); },
+            publish: value => {
+              if (!owns(ticket)) return;
+              submission = value && Number.isSafeInteger(value.sent) && value.sent >= 0 && Number.isSafeInteger(value.total) && value.total >= value.sent ? value : null;
+              if (submission) problems.clear("progress");
+              notify();
+            } });
+          notify();
+        }
         await Promise.all(inspections);
         const runChecks = new Map([...capturedChecks].map(([id, checks]) => [id,
           new Map([...checks].map(([identity, value]) => [identity, freeze(snapshotDraft(value))]))]));
         const runEvidence = (id, item) => runChecks.get(id)?.get(imageIdentity(item));
         for (const target of ticket.targets) check(ticket, target);
         let uploadFailure = false;
-        if (saved) operation.targetPlans = freeze(await services.history.plans(ticket, saved, target => check(ticket, target)));
+        if (saved) {
+          const planned = await services.history.plans(ticket, saved, target => check(ticket, target));
+          // Narrow service rigs retain their old array contract; the installed
+          // history owner always returns explicit plans and leftovers.
+          operation.targetPlans = freeze(Array.isArray(planned) ? planned : planned.plans);
+          operation.cohort = !Array.isArray(planned);
+          for (const leftover of planned.leftovers ?? []) leftovers.set(leftover.target.id, leftover);
+        }
         else {
-        if (ticket.destination && ticket.targets.some(target => !sameOrigin(ticket.destination, target.origin))) throw new Error("Running on another ComfyUI requires saved-run history; nothing was sent.");
+         if (ticket.destination && ticket.targets.some(target => !sameOrigin(ticket.destination, target.origin))) throw problemError(variationProblem("run-unbound", { phase: "capture", target: targetIdentity(ticket.targets[0]) }));
         // Explicit narrow legacy service rigs retain their old wire contract.
         // Application installation always supplies history and rejects unbound
         // Run requests; capture failures never enter this compatibility branch.
         operation.compiled = compile(ticket.snapshot, null, false, runEvidence);
-        if (operation.compiled.uploads.length && new Set(ticket.targets.map(target => target.origin?.address)).size > 1) throw new Error("Local-file variations across different backends are unsupported. Your files and edits have been kept.");
+         if (operation.compiled.uploads.length && new Set(ticket.targets.map(target => target.origin?.address)).size > 1) throw problemError(variationProblem("legacy-backends", { phase: "upload", numbers: { images: ticket.targets.length, backends: new Set(ticket.targets.map(target => target.origin?.address)).size, files: operation.compiled.uploads.length } }));
         for (const target of ticket.targets) check(ticket, target);
         const prepared = new Map();
         for (const target of ticket.targets) {
@@ -682,17 +1044,17 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         }));
         }
         const proofs = [];
-        await Promise.all(operation.targetPlans.map(async ({ target, request, expectedTotal }) => {
+        for (const { target, request, expectedTotal } of operation.targetPlans) {
           try {
             check(ticket, target);
             if ([...uploads.values()].some(receipt => !physicalMatch(receipt.origin, target.origin))) throw new Error(staleSource(target.host));
             const context = request.context;
             let response;
-            try { response = await services.run(request); }
-            catch (error) {
-              uncertain = true;
-              effects.targets.push({ id: target.id, requestId: request.acknowledgement.requestId, outcome: "uncertain", error: error.message });
-              throw error;
+             try { response = await services.run(request); }
+             catch (error) {
+               uncertain = true;
+               effects.targets.push({ id: target.id, requestId: request.acknowledgement.requestId, outcome: "uncertain", error: error.message });
+               throw problemError(problemFrom(error, { code: "run-response-lost", phase: "submission", target: targetIdentity(target), destination: ticket.destination?.source ?? target.host, numbers: { expected: expectedTotal } }));
             }
             const data = response.data;
             effects.targets.push({ id: target.id, requestId: request.acknowledgement.requestId, status: response.status, data: snapshotDraft(data) });
@@ -701,45 +1063,81 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
             if (!response.ok || !Number.isSafeInteger(data?.submitted) || !Number.isSafeInteger(data?.total) || data.total <= 0 || data.submitted !== data.total ||
               !Array.isArray(data.errors ?? []) || data.errors?.length) countsComplete = false;
             check(ticket, target);
-            if (!response.ok) { failures.push(sourceFailure(response.status, data?.error ?? response.text ?? `error ${response.status}`, ticket.destination?.source ?? target.host)); return; }
+              if (!response.ok) { throw problemError(problemFrom({ problem: data?.problem, message: data?.error ?? response.text ?? `HTTP ${response.status}` }, { code: "run-receipt", phase: "submission", target: targetIdentity(target), destination: ticket.destination?.source ?? target.host, numbers: { expected: expectedTotal } })); }
              const proof = request.history ? acknowledgedHistoryFields(request, data) : acknowledgedFields(request, data);
-            for (const error of Array.isArray(data?.errors) ? data.errors : []) failures.push(error?.error ?? String(error));
+             for (const error of Array.isArray(data?.errors) ? data.errors : []) failures.push(error?.problem ? problemText(problemFrom(error, { target: targetIdentity(target) })) : error?.error ?? String(error));
             if (!proof || data.total !== expectedTotal || !sameContext(context, data.acknowledgement?.context)) {
               uncertain ||= data.outcome === "uncertain-effects" || data.submitted === data.total && !data.errors?.length;
-              failures.push("submission acknowledgement unavailable; your edits have been kept.");
+               failures.push(problemText(variationProblem("run-receipt", { phase: "submission", target: targetIdentity(target), destination: ticket.destination?.source ?? target.host, numbers: { expected: expectedTotal }, detail: "binding, count or operation coverage mismatch" })));
             }
-            else proofs.push(proof);
-          } catch (error) { countsComplete = false; failures.push(`${target.filename}: ${error.message}`); }
-        }));
+             else proofs.push({ target, proof, count: expectedTotal });
+              if (!proof || data.total !== expectedTotal) leftovers.set(target.id, { target, problem: data.errors?.find(error => error.problem)?.problem ?? variationProblem("run-receipt", { phase: "submission", target: targetIdentity(target), destination: ticket.destination?.source ?? target.host, numbers: { expected: expectedTotal }, detail: "binding, count or operation coverage mismatch" }) });
+           } catch (error) { countsComplete = false; const problem = problemFrom(error, { code: "run-receipt", phase: "submission", target: targetIdentity(target), destination: ticket.destination?.source ?? target.host, numbers: { expected: expectedTotal } }); failures.push(problemText(problem)); leftovers.set(target.id, { target, problem }); }
+        }
         if (!owns(ticket)) return { status: "stale" };
-        const complete = !uploadFailure && failures.length === 0 && proofs.length === ticket.targets.length;
-        const eligible = complete && compatible(ticket);
+        const complete = !uploadFailure && failures.length === 0 && proofs.length === operation.targetPlans.length && proofs.length > 0;
+        const eligible = complete && !leftovers.size && compatible(ticket);
         if (eligible) acceptedRevision = ticket.editRevision;
+        if (saved && operation.cohort) {
+          const newerEdits = recipe.revision() !== ticket.editRevision;
+          if (newerEdits) {
+            // These outcomes describe the captured setup, not the newer raw
+            // recipe. Keep its whole cohort so unsent edits still have targets.
+            for (const { target, count } of proofs) runOutcomes.set(target.id, freeze({ state: "queued", message: `Queued ${count} job${count === 1 ? "" : "s"}` }));
+            for (const leftover of leftovers.values()) runOutcomes.set(leftover.target.id, freeze({ state: "issue", message: leftover.problem.message }));
+          } else {
+            const queued = new Set(proofs.map(({ target }) => target.id));
+            if (complete && !leftovers.size) queuedCohort = {
+              targets: ticket.targets, revision: ticket.editRevision,
+              outcomes: proofs.map(({ target, count }) => [target.id, freeze({ state: "queued", message: `Queued ${count} job${count === 1 ? "" : "s"}` })]),
+            };
+            replaceTargets(selectedTargets.filter(target => !queued.has(target.id)));
+            for (const leftover of leftovers.values()) runProblems.set(leftover.target.id, { revision: ticket.editRevision, problem: leftover.problem });
+          }
+          planKey = null;
+        }
         const summary = batch ? `submitted ${submitted}/${total} across ${ticket.targets.length} images` : `submitted ${submitted}/${total}`;
-        const reason = failures[0] ?? (!eligible ? deciding ? "leave decision pending; your edits have been kept" : recipe.revision() !== ticket.editRevision ? "newer edits have been kept" : "operation context changed; your edits have been kept"
-          : "");
+        const newerEdits = recipe.revision() !== ticket.editRevision;
+         const scope = variationProblem("cohort-result", { phase: "submission", newer: newerEdits, numbers: { confirmed: proofs.reduce((sum, proof) => sum + proof.count, 0), successful: proofs.length, images: ticket.targets.length, failed: leftovers.size, unknown: effects.targets.reduce((sum, target) => sum + (target.data?.effectCounts?.unknown ?? target.data?.problem?.effects?.unknown ?? (proofs.some(proof => proof.target.id === target.id) ? 0 : operation.targetPlans.find(plan => plan.target.id === target.id)?.expectedTotal ?? 0)), 0), planned: saved?.admission?.reduce((sum, target) => sum + target.count, 0) ?? operation.targetPlans.reduce((sum, plan) => sum + plan.expectedTotal, 0), remaining: newerEdits ? ticket.targets.length : selectedTargets.length } });
+         const reason = [...new Set([problemText(scope), ...failures, ...[...leftovers.values()].map(({ problem }) => problemText(problem)),
+           !eligible && !newerEdits && !leftovers.size ? deciding ? "leave decision pending; your edits have been kept" : "operation context changed; your edits have been kept" : ""].filter(Boolean))].join("\n");
         show = true;
         outcome = ({ text: submitted || total ? summary + (reason ? ` — ${reason}` : "") : reason || "nothing submitted", reason, ok: complete,
-          state: eligible ? "adopted" : complete ? "kept" : "unavailable", submitted, total, adopted: eligible,
+          state: eligible ? "adopted" : complete ? "kept" : "unavailable", submitted, total, adopted: eligible, summaryProblem: scope,
           effects: freeze(snapshotDraft(effects)), outcome: complete ? "accepted-plan" : !ticket.targets.every(originCurrent) ? "retired" : uncertain ? "uncertain-effects" : submitted ? "partial-effects" : "rejected" });
         // Only a complete, eligible run may close itself; failures stay on screen.
         closable = eligible;
         return { status: submitted > 0 && countsComplete && !uploadFailure ? "submitted" : "failed", submitted, total, adopted: eligible };
       } catch (error) {
         show = owns(ticket);
+        if (show && recipe.revision() !== ticket.editRevision) for (const target of ticket.targets) runOutcomes.set(target.id, freeze({ state: "issue", message: error.message }));
         outcome = { text: error.message, ok: false, state: error.stale ? "stale" : "invalid", outcome: error.stale ? "retired" : "rejected", submitted, total, adopted: false, effects: freeze(snapshotDraft(effects)) };
         return { status: owns(ticket) ? error.stale ? "stale" : "invalid" : "stale", submitted, total, adopted: false };
        } finally {
+          const stop = stopProgress; stopProgress = null;
+          if (stop) await stop();
          if (services.history) {
-           try { await services.history.finish(ticket.runId, outcome?.ok ? null : outcome?.reason ?? outcome?.text ?? null); }
+            try {
+              const finished = await services.history.finish(ticket.runId, outcome?.ok ? null : outcome?.reason ?? outcome?.text ?? null);
+              if (finished?.summary?.effects || finished?.effects) {
+                const effectCounts = finished.summary?.effects ?? finished.effects, previous = outcome?.summaryProblem;
+                if (previous) {
+                  const next = variationProblem(previous.code, { ...previous, numbers: { ...previous.numbers, confirmed: effectCounts.confirmed, unknown: effectCounts.unknown } });
+                  outcome = { ...outcome, summaryProblem: next, reason: outcome.reason.replace(problemText(previous), problemText(next)), text: outcome.text.replace(problemText(previous), problemText(next)) };
+                }
+                outcome = { ...outcome, effectCounts };
+              }
+              if (finished?.refreshProblem && owns(ticket)) { problems.report("history-refresh", finished.refreshProblem); closable = false; }
+            }
            catch (error) {
              // The result line shows `reason` when present: the failure must appear there too.
              closable = false;
-             if (owns(ticket)) { show = true; const failed = `history refresh failed: ${error.message}`;
+              if (owns(ticket)) { show = true; const failed = problemText(problemFrom(error, { code: "history-finish", phase: "history finish", runId: ticket.runId }));
                outcome = { ...outcome, historyError: error.message, reason: `${outcome?.reason || outcome?.text || "Run ended"}; ${failed}`, text: `${outcome?.text ?? "Run ended"}; ${failed}` }; }
            }
          }
-         if (show) result = Object.freeze(outcome);
+          if (!owns(ticket)) services.history?.notice?.(ticket.runId, variationProblem("run-retired", { severity: "warning", phase: "submission", runId: ticket.runId }));
+          if (show) result = Object.freeze(outcome);
          if (owns(ticket)) running = false;
          // The automatic close starts only once the run has fully ended.
          if (closable && canClose(ticket)) timer = setTimer(() => { timer = null; if (canClose(ticket)) close(); }, 3000);
@@ -747,10 +1145,42 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
        }
     },
     dispose() {
-      alive = false; invalidateClose(); active = null; sourceFiles.clear(); pexelsFiles.clear(); inputCatalogues.clear(); sourceLifetimes.clear();
+      alive = false; invalidateClose(); active = null; rotations.clear(); rotationSources.clear(); rotating.clear(); sourceFiles.clear(); pexelsFiles.clear(); inputCatalogues.clear(); sourceLifetimes.clear();
+      orderedPicks.clear(); pumpAcquisitions();
+      stopProgress?.(); stopProgress = null;
+      planGeneration++; planController?.abort(); if (planTimer !== null) clearTimer(planTimer);
       timingController.abort(); generationTimes.clear();
       for (const record of heldRecords.values()) services.history?.release(record).catch(() => {});
       heldRecords.clear();
     },
   };
+  // One public intent boundary: malformed/stale edits and catalogue construction
+  // cannot escape to a global handler or strand the readiness state.
+  for (const method of ["installCatalogue", "setEnabled", "candidate", "addCandidate", "removeCandidate", "moveCandidate", "pickCandidate", "connection", "edit", "range", "template", "addImages", "dropImages", "removeImage", "toggleTargetImage", "moveImage"]) {
+    const invoke = editor[method];
+    editor[method] = function (...args) {
+      try { return invoke.apply(editor, args); }
+      catch (error) {
+        if (!alive) return false;
+        const id = method === "edit" ? args[1] : typeof args[0] === "string" ? args[0] : null;
+        const context = { phase: method === "installCatalogue" ? "catalogue" : "edit", target: targetIdentity(capturedTargets[0]), ...(id ? { parameter: parameter(id) } : {}), detail: error.message };
+        const problem = error.catalogueIssue ? problemFrom(error, context) : variationProblem(method === "installCatalogue" ? "catalogue-install" : "edit-failed", context);
+        if (method === "installCatalogue") catalogueError = problemText(problem);
+        problems.report(method === "installCatalogue" ? "catalogue" : `edit:${id}`, problem); changed(); return false;
+      }
+    };
+  }
+  return editor;
+}
+
+// Validate with the actual recipe/strategy owner before the broker replaces a
+// live draft. This temporary owner has no IO, timers, history or publication port.
+export function validateHistoryOpening(record) {
+  const editor = makeVariationEditor({ targets: record.targets, cohortMode: record.cohortMode, destination: record.destination,
+    services: {}, currentOrigin: source => record.targets.find(target => target.host === source)?.origin });
+  try {
+    editor.restoreHistory(record);
+    const problem = editor.problems().find(problem => problem.severity === "error");
+    if (problem) throw Object.assign(new Error(problem.message), { problem });
+  } finally { editor.dispose(); }
 }

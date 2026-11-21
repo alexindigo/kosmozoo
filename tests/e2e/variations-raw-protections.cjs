@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, settledCount } = require('./variation-add-helpers.cjs');
 
 // Selectable consumer scenario: new raw leaves use the existing ticket/decision
 // protections, with genuine held acknowledgements and no replay of typed Run.
@@ -33,6 +33,7 @@ module.exports = async ({ cdp, errors, FAKE, E, KZ, write, shot }) => {
     await write('.vz-prefix', 'raw_'); await write('.vz-suffix', '_manual_{92:105.flag}');
   };
   const hold = async () => {
+    await settledCount(cdp, { test: 'Number(count)>0' });
     await cdp.evaluate(`(async()=>{window.__rawFetch=window.fetch;window.__rawRelease=null;window.fetch=(url,options)=>{const task=window.__rawFetch(url,options);return String(url).includes('/features/variations/run')?task.then(response=>new Promise(resolve=>window.__rawRelease=()=>resolve(response))):task};window.__rawRun=${KZ}.handles.invoke('variations.run')})()`);
     try { await cdp.poll('typeof window.__rawRelease==="function"'); }
     catch (error) { await shot('held-run-failure'); error.message += ' ' + JSON.stringify(await cdp.evaluate('({message:document.querySelector(".vz-messages").textContent,fields:[...document.querySelectorAll(".vz-candidate-row textarea")].map(el=>el.value)})')); throw error; }
@@ -52,7 +53,7 @@ module.exports = async ({ cdp, errors, FAKE, E, KZ, write, shot }) => {
   // Ordered whole candidates: blank is invalid, actions preserve exact spelling.
   await cdp.clickAt(row('object') + ' .vz-candidate-add');
   await cdp.clickAt('.vz-run'); assert.equal(await jobs(), 0);
-  await cdp.poll('document.querySelector(".vz-error").textContent.includes("complete JSON")');
+  await cdp.poll('document.querySelector(".vz-messages").textContent.includes("complete JSON")&&document.querySelector(".vz-run").disabled');
   await shot('empty-candidate-error');
   await write(row('object') + ' .vz-candidate-entry:nth-child(2) textarea', '{}');
   await cdp.clickAt(row('object') + ' [aria-label="Move candidate 2 up"]');
@@ -62,19 +63,19 @@ module.exports = async ({ cdp, errors, FAKE, E, KZ, write, shot }) => {
   await cdp.clickAt(row('object') + ' [aria-label="Remove candidate 2"]');
   await cdp.clickAt(row('object') + ' [aria-label="Remove candidate 1"]');
   await cdp.clickAt('.vz-run'); assert.equal(await jobs(), 0);
-  await cdp.poll('document.querySelector(".vz-error").textContent.includes("at least one")'); await shot('zero-json-candidates');
+  await cdp.poll('document.querySelector(".vz-messages").textContent.includes("at least one")&&document.querySelector(".vz-run").disabled'); await shot('zero-json-candidates');
   await cdp.clickAt(row('object') + ' .vz-candidate-add');
   await write(row('object') + ' textarea', ' { "kept": 9007199254740993 } ');
   await cdp.clickAt(row('flag') + ' .vz-typed-options label:nth-child(2) input');
   await cdp.clickAt('.vz-run'); assert.equal(await jobs(), 0);
-  await cdp.poll('document.querySelector(".vz-error").textContent.includes("at least one")');
+  await cdp.poll('document.querySelector(".vz-messages").textContent.includes("at least one")&&document.querySelector(".vz-run").disabled');
   await cdp.evaluate(`document.querySelector('${row('flag')}').scrollIntoView({block:'center'})`); await shot('empty-boolean-error');
   await cdp.clickAt(row('flag') + ' .vz-typed-options label:nth-child(2) input');
   await cdp.evaluate(`document.querySelector('${row('choice')}').scrollIntoView({block:'center'})`); await shot('typed-option-states');
   assert.deepEqual(await cdp.evaluate(`[...document.querySelectorAll('${row('choice')} .vz-typed-options .single-line-text')].map(el=>el.textContent)`), ['false','null','0','"0"']);
   await cdp.clickAt(row('choice') + ' .vz-typed-options label:nth-child(3) input');
   await cdp.clickAt('.vz-run'); assert.equal(await jobs(), 0);
-  await cdp.poll('document.querySelector(".vz-error").textContent.includes("at least one")'); await shot('empty-typed-options');
+  await cdp.poll('document.querySelector(".vz-messages").textContent.includes("at least one")&&document.querySelector(".vz-run").disabled'); await shot('empty-typed-options');
   await cdp.clickAt(row('choice') + ' .vz-typed-options label:nth-child(3) input');
   const output = row('connection') + ' select[aria-label$=" output"]';
   const chooseOutput = value => cdp.evaluate(`(()=>{const el=document.querySelector('${output}');el.value=${JSON.stringify(value)};el.dispatchEvent(new Event('change',{bubbles:true}))})()`);

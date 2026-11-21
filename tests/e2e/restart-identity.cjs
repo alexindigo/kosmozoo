@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path');
 const { CDP, collectPageErrors, sleep } = require('./cdp.cjs');
-const { addParameter, removeRecordedImage } = require('./variation-add-helpers.cjs');
+const { addParameter, removeRecordedImage, settledCount } = require('./variation-add-helpers.cjs');
 const B = process.env.E2E_ENGINE, F = process.env.E2E_FAKE, R = process.env.E2E_RESTART_DIR;
 assert(R && path.isAbsolute(R), 'restart-identity needs an absolute E2E_RESTART_DIR shared with the engine restart runner');
 const D = process.env.E2E_EVIDENCE ?? process.env.KZ_TIME_EVIDENCE, folder = process.env.E2E_FOLDER_IMAGES ?? '/work/tests/fixtures';
@@ -34,7 +34,7 @@ async function restart() {
   const field = (selector, value) => c.evaluate(`(()=>{const el=document.querySelector(${JSON.stringify(selector)});el.value=${JSON.stringify(value)};el.dispatchEvent(new Event('input',{bubbles:true}));})()`);
   const open = async () => {
     await invoke('variations.open', { id: `fake:${name}` }); await addParameter(c, '470.image');
-    await removeRecordedImage(c, '470.image'); await c.clickAt('[data-image-id="470.image"] .vz-image-plus');
+    await removeRecordedImage(c, '470.image');
   };
   try {
     await c.goto(B + '/#fake#' + name);
@@ -56,7 +56,7 @@ async function restart() {
     assert.equal(await c.evaluate(`(async()=>${KZ}.state.selected[${JSON.stringify(`fake:${name}`)}]===true)()`), true);
     await c.clickAt('.vz-folder-trigger'); await field('.vz-folder-path', folder); await c.clickAt('.vz-folder-add');
     await c.poll(`document.querySelectorAll('[data-image-kind="server-path"]').length>0`, 30000);
-    await c.poll(`Number(document.querySelector('.vz-count')?.textContent)>0&&!document.querySelector('.vz-messages')?.textContent.includes('Checking images')`, 30000);
+    await settledCount(c, { test: 'Number(count)>0' }, { and: `!document.querySelector('.vz-messages')?.textContent.includes('Checking images')`, timeout: 30000 });
     proof.run = await invoke('variations.run'); assert(proof.run.submitted > 0, JSON.stringify(proof.run));
     assert(!/origin changed|removed or changed since/.test(await c.evaluate(`document.querySelector('.vz-messages')?.textContent??''`)));
     await c.poll(`!document.querySelector('.vz-panel')`, 20000);
@@ -72,7 +72,7 @@ async function restart() {
     await post(B, '/api/collections', { name: 'fake', address: proof.before.address });
     await c.poll(`(async()=>!!${KZ}.state.hosts.fake&&${KZ}.state.hosts.fake.incarnation!==${JSON.stringify(proof.before.incarnation)})()`, 30000);
     proof.stale = await invoke('variations.run');
-    const message = 'fake was removed or changed since Variations opened. Nothing more was sent; reopen Variations to continue. Your edits are kept until you close.';
+    const message = `${name}: fake changed. Your edits remain here; previously issued jobs/uploads are not reversed.`;
     await c.poll(`document.querySelector('.vz-messages')?.textContent.includes(${JSON.stringify(message)})`);
     assert.equal((await (await fetch(F + '/__test/enqueues')).json()).length, before, 'stale registration sends no jobs');
     assert.deepEqual(errors, []);

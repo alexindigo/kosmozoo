@@ -17,7 +17,7 @@ module.exports = async ({ page, ENGINE, FAKE, KZ, check, traffic }) => {
     host:s.state.host(),online:s.state.hosts.fake?.online,
     offline:!!document.querySelector('.hostpick.off[data-source="fake"]')&&!!document.querySelector('#hostBtn .hdot.off'),
     errors:[...document.querySelectorAll('#statusStack .error')].map(e=>e.textContent)
-      .filter(text=>text.includes('GET /api/collections/fake/entries?inventory=1: 502 — collection unreachable:')),
+      .filter(text=>text.includes('GET /api/collections/fake/entries?inventory=1')&&text.includes('collection unreachable:')),
   };})()`;
   const failedInventoryReads=()=>{
     const ids=new Set(traffic.requests.filter(request=>{
@@ -56,6 +56,7 @@ module.exports = async ({ page, ENGINE, FAKE, KZ, check, traffic }) => {
     })()`);
     await page.send('Input.insertText',{text:'completion-flow retained note'});
     await page.evaluate(`(async()=>await ${KZ}.handles.invoke('variations.open',{id:'fake:flux-basic.png'}))()`);
+    await require('./variation-add-helpers.cjs').addParameter(page, '9.denoise');
     const field='.vz-slider-row[data-param-key$="denoise"] .vz-row-inc-input';
     await page.poll(`!!document.querySelector(${JSON.stringify(field)})`,20000);
     await page.evaluate(`(()=>{const input=document.querySelector(${JSON.stringify(field)});input.focus();input.select();})()`);

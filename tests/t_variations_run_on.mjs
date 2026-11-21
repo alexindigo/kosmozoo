@@ -4,6 +4,8 @@ import { makeHistoryClient } from "../client-solid/features/variations/history-c
 import { cataloguePresentation } from "../client-solid/features/variations/field-filter.js";
 import { permutationPlan, generatePermutations, automaticNaming, reproducesOriginal } from "../src/features/variations/shared.mjs";
 import { editorRig } from "./helpers/variation-editor.mjs";
+const conflictMessage = names => `image.png: ${names.length} destination conflicts block Run on other: ${names.join(", ")}. Choose available values below or another destination.`;
+const catalogueFailure = cause => `Could not read image.png's workflow for other: ${cause}. Your edits are kept. Retry the check or choose a reachable destination.`;
 
 function rig() {
   const base = editorRig(); base.editor.dispose();
@@ -24,7 +26,8 @@ Deno.test("run on: the destination catalogue gates preview and Run until it is i
   assertEquals(r.editor.preview().status, "ready");
   assert(r.editor.setDestination(r.origin)); assertEquals(r.editor.preview().status, "reading");
   r.install({ "choice.value": { kind: "node", type: "Choice" } });
-  assertEquals(r.editor.preview().status, "reading", "a late reply for the previous destination cannot install");
+  assertEquals(r.editor.preview().status, "failed", "a mismatched reply reaching the current install boundary cannot install or leave an endless wait");
+  assert(r.editor.preview().message.includes("not selected fake"));
   r.editor.installCatalogue({ ...r.catalogue, destination: { origin: r.origin, missing: [], conflicts: {} } });
   assertEquals(r.editor.preview().status, "ready");
   assertEquals(r.editor.destination(), r.origin);
@@ -39,13 +42,13 @@ Deno.test("run on: value conflicts are red until resolved; node conflicts block"
   assertEquals(rows["choice.value"].conflict.host, "other");
   assertEquals(cataloguePresentation(r.editor.catalogue())[0].name, "Conflicts");
   assertEquals(r.editor.preview().status, "conflict");
-  assertEquals(r.editor.preview().message, "Resolve 2 conflicts with other before running.");
+  assertEquals(r.editor.preview().message, conflictMessage(["Choice #choice \u00b7 value", "Text #text \u00b7 text"]));
   assertEquals((await r.editor.run()).status, "invalid"); assertEquals(r.requests.length, 0);
   assertEquals(r.editor.resolveConflict("choice.value", "missing"), false, "only declared destination choices");
   assert(r.editor.resolveConflict("choice.value", "second"));
   assertEquals(r.editor.rows("enums")["choice.value"].picks, ["second"]);
   assertEquals(r.editor.rows("enums")["choice.value"].conflict, null);
-  assertEquals(r.editor.preview().message, "Resolve 1 conflict with other before running.");
+  assertEquals(r.editor.preview().message, conflictMessage(["Text #text \u00b7 text"]));
   assertEquals(r.editor.resolveConflict("text.text", "x"), false);
   r.editor.dispose();
 });
@@ -53,7 +56,7 @@ Deno.test("run on: value conflicts are red until resolved; node conflicts block"
 Deno.test("run on: the issued ticket captures the destination and history binds uploads/plans to it", async () => {
   const r = rig(); r.install({});
   let begun; const bindings = [];
-  const history = makeHistoryClient({ api: { historyBegin: body => { begun = body; }, historyPrepare: () => ({ snapshotHash: "a".repeat(64), targets: [{ graphResources: {} }], recipe: { images: {} } }),
+  const history = makeHistoryClient({ api: { historyBegin: body => { begun = body; }, historyPrepare: () => ({ snapshotHash: "a".repeat(64), targets: [{ graphResources: {} }], recipe: { images: {} }, admission: [{ index: 0, count: 1, problem: null }] }),
     historyMaterialize: () => ({}), historyTarget: (_id, binding) => { bindings.push(binding); throw new Error("stop after binding"); } } });
   const ticket = { runId: crypto.randomUUID(), targets: [{ id: "fake:image.png", host: "fake", filename: "image.png", origin: r.origin }], snapshot: { numeric: {}, images: {}, enums: {}, texts: {}, candidates: {}, naming: {} }, destination: r.other };
   const prepared = await history.capture(ticket, new Map(), () => {});
@@ -99,12 +102,12 @@ Deno.test("run on: unchecked inputs inform without becoming conflicts and retire
   r.editor.installCatalogue({ ...r.catalogue, destination: { origin: r.other, missing: [], conflicts: {}, unchecked: ["text.text"] } });
   assertEquals(r.editor.preview().status, "ready");
   assertEquals(r.editor.preview().unchecked, ["text.text"]);
-  assertEquals(r.editor.preview().uncheckedMessage, "1 recorded input is unchecked on other; ComfyUI will validate them at submission.");
+  assertEquals(r.editor.preview().uncheckedMessage, "image.png: 1 recorded inputs (Text #text \u00b7 text) are unchecked on other; they have no usable declarations. ComfyUI will validate them at submission. Inspect or change these inputs, or use another destination; Run can attempt them but ComfyUI may reject them.");
   assertEquals(r.editor.preview().message, "");
   r.editor.installCatalogue({ ...r.catalogue, destination: { origin: r.other, missing: [], conflicts: { "choice.value": { kind: "value", current: "first", choices: ["second"], suggestions: [] } }, unchecked: ["text.text"] } });
   assertEquals(r.editor.preview().status, "conflict");
-  assertEquals(r.editor.preview().message, "Resolve 1 conflict with other before running.");
-  assert(r.editor.preview().uncheckedMessage.startsWith("1 recorded input"));
+  assertEquals(r.editor.preview().message, conflictMessage(["Choice #choice \u00b7 value"]));
+  assert(r.editor.preview().uncheckedMessage.startsWith("image.png: 1 recorded inputs"));
   assert(r.editor.setDestination(r.origin));
   assertEquals(r.editor.preview().uncheckedMessage, undefined, "pending destinations cannot inherit old review facts");
   r.editor.installCatalogue({ ...r.catalogue, destination: { origin: r.origin, missing: [], conflicts: {}, unchecked: [] } });
@@ -125,7 +128,7 @@ Deno.test("run on: picking only the current value is one variation on another ho
 Deno.test("run on: a failed catalogue request says so, sends nothing and can be retried", async () => {
   const r = rig();
   r.editor.catalogueFailure(new Error("HTTP 502"));
-  assertEquals([r.editor.preview().status, r.editor.preview().message], ["failed", "Couldn't check other: HTTP 502"]);
+  assertEquals([r.editor.preview().status, r.editor.preview().message], ["failed", catalogueFailure("HTTP 502")]);
   assertEquals((await r.editor.run()).status, "invalid"); assertEquals(r.requests.length, 0);
   assert(r.editor.result().text.endsWith("Nothing was sent."));
   assert(r.editor.retryCatalogue());
@@ -135,8 +138,8 @@ Deno.test("run on: a failed catalogue request says so, sends nothing and can be 
   r.install({});
   assertEquals(r.editor.preview().status, "ready");
   r.editor.catalogueFailure(Object.assign(new Error("GET /api/features/variations/probe/x: 502 \u2014 object_info timed out"), { status: 502, detail: "object_info timed out" }));
-  assertEquals(r.editor.preview().message, "Couldn't check other: object_info timed out", "the server's reason, not the request path");
+  assertEquals(r.editor.preview().message, catalogueFailure("object_info timed out"), "the server's reason, not the request path");
   r.editor.catalogueFailure(Object.assign(new Error("GET /x: 504"), { status: 504, detail: "" }));
-  assertEquals(r.editor.preview().message, "Couldn't check other: HTTP 504");
+  assertEquals(r.editor.preview().message, catalogueFailure("HTTP 504"));
   r.editor.dispose();
 });

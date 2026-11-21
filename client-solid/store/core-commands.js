@@ -75,13 +75,12 @@ export function registerCoreCommands(handles, { ops, state, clipboard = copyText
     execute(a) {
       const snapshot = resolveIds(a);
       if (a.id || a.target === "current") return snapshot.length ? ops.judgments.dispatch(snapshot[0], a.intent) : false;
-      const tasks = snapshot.map((id) => ops.judgments.dispatch(id, a.intent));
-      return Promise.all(tasks).then((results) => {
+      return ops.judgments.dispatchMany(snapshot, a.intent).then((results) => {
         if (a.target === "selected") {
           const count = results.filter((result) => result.ok).length;
           const patch = a.intent.patch ?? {};
           const label = patch.vote ? patch.vote === "up" ? "up-voted" : "down-voted" : patch.bookmark ? "bookmarked" : "favorited";
-          if (count) ops.status.info(`${count} image${count > 1 ? "s" : ""} ${label}`);
+          if (count && patch.vote !== "down") ops.status.info(`${count} image${count > 1 ? "s" : ""} ${label}`);
         }
         return results;
       });
@@ -102,6 +101,8 @@ export function registerCoreCommands(handles, { ops, state, clipboard = copyText
     return images.length ? ops.images.delete([...images]) : false;
   });
   add("image.delete.cancel", {}, () => ops.confirm.close());
+  add("image.deleteDownVoted.request", {}, () => ops.downVotedDeletion.request(), "delete down-voted images from the current source");
+  add("image.deleteDownVoted.confirm", {}, () => ops.downVotedDeletion.confirm());
   add("selection.set", { id: string, value: bool }, (a) => ops.selected.set(a.id, a.value));
   add("selection.clear", {}, () => ops.bulk.clear());
   add("entry.select", { source: string, file: string }, (a) => ops.current.set(a.source, a.file));
@@ -205,6 +206,7 @@ export function commandFacades(handles, ops, state) {
     toggleReveal: () => invoke("preference.revealDown"), toggleHideUp: () => invoke("preference.hideUp"),
     setDownvoteHides: (value) => invoke("preference.downvoteHides", { value }),
   });
+  delete facade.judgments.dispatchMany;
   Object.assign(facade.bulk, {
     clear: () => invoke("selection.clear"),
     vote: (vote) => invoke("judgment.apply", { target: "selected", intent: { type: "set", patch: { vote } } }),
@@ -214,6 +216,7 @@ export function commandFacades(handles, ops, state) {
   facade.images.download = (id) => invoke("image.download", { id });
   facade.images.reload = () => invoke("source.reload");
   delete facade.images.delete;
+  delete facade.downVotedDeletion;
   facade.selected.set = (id, value) => invoke("selection.set", { id, value });
   Object.assign(facade.confirm, {
     open: (req) => invoke("image.delete.request", req.image ? { id: req.image.id } : { ids: req.images.map((image) => image.id) }),

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { addParameter } = require('./variation-add-helpers.cjs');
 module.exports = async ({ cdp, ENGINE, FAKE, KZ, check }) => {
-  const invoke = (id, args = {}) => cdp.evaluate(`(async()=>${KZ}.handles.invoke(${JSON.stringify(id)},${JSON.stringify(args)}))()`);
+  const invoke = require('./variation-add-helpers.cjs').variationInvoker(cdp,KZ);
   const dismiss = async () => {
     if (!await cdp.evaluate("!!document.querySelector('.vz-panel')")) return;
     await cdp.evaluate(`(async()=>{${KZ}.handles.invoke('variations.close');return true})()`);

@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { CDP, collectPageErrors } = require('./cdp.cjs');
 const { openImageFolder, openImageAdd, waitForInputPicker } = require('./image-picker-helpers.cjs');
+const { addParameter } = require('./variation-add-helpers.cjs');
 const KZ = '(await import("/store/instance.js")).appStore';
 
 async function textFields({ page, check = (name, ok, detail) => { assert(ok, detail); console.log('ok ' + name); } }) {
@@ -73,8 +74,8 @@ async function textFields({ page, check = (name, ok, detail) => { assert(ok, det
   await page.evaluate(`(async()=>${KZ}.actions.ui.setWorkspace('details'))()`);
   await page.evaluate("fetch('/api/collections/fake/entries/flux-controlnet.png/bytes').then(r=>r.arrayBuffer()).then(()=>true)");
   await invoke('variations.open', { id: 'fake:flux-controlnet.png' });
-  await page.poll("document.querySelectorAll('.vz-parameter').length>8");
-  await page.evaluate("[...document.querySelectorAll('.vz-parameter:not(.on) > .vz-parameter-heading .checkbox')].forEach(el=>el.click())");
+  await page.poll("document.querySelectorAll('.vz-catalogue-row').length>8");
+  for (const id of ['43.image', '9.denoise', '9.steps', '7.noise_seed', '5.guidance', '41.strength', '2.text']) await addParameter(page, id);
   await page.poll("!!document.querySelector('.vz-text-values')&&!!document.querySelector('.vz-row-inc-input')");
   await page.evaluate("document.querySelector('.vz-text-values').focus();document.querySelector('.vz-text-values').select()");
   await page.send('Input.insertText', { text: 'A {{subject}}' });
@@ -118,8 +119,9 @@ async function textFields({ page, check = (name, ok, detail) => { assert(ok, det
   try {
     await page.poll(`(async()=>!!${KZ}.state.hosts['${source}'])()`);
     await page.evaluate(`fetch('/api/collections/${source}/entries/${filename}/bytes').then(r=>r.arrayBuffer()).then(()=>true)`);
+    await invoke('source.select', { id: source });
     await invoke('variations.open', { id: `${source}:${filename}` });
-    await page.poll("!!document.querySelector('.vz-enumrow')"); await page.clickAt('.vz-enumrow .checkbox');
+    await addParameter(page, '81.model');
     await page.poll("!!document.querySelector('.vz-enum-filter')");
     await inspect('enum catalogue filter', 4, '.vz-panel'); await capture('enum-filter', '.vz-enum-filter');
     await page.clickAt('.vz-close');
