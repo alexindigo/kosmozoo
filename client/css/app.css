@@ -1387,12 +1387,14 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .tabs-tab.is-active { background: var(--lifted); border-color: var(--secondary); }
 .tabs > .tabs-tab:focus-visible { outline: none; border-color: var(--secondary); box-shadow: inset 0 0 0 1px var(--secondary); }
 .vz-input-tabs { flex: 0 0 auto; min-width: 0; }
-.vz-input-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; flex: 0 0 auto; min-width: 0; overflow-x: auto; }
-.vz-input-summary > span:first-child { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
-.vz-input-feeds { flex: 0 0 auto; white-space: nowrap; }
+.vz-input-summary { display: grid; grid-template-columns: max-content; align-items: center; gap: 12px;
+  flex: 0 0 auto; width: max-content; max-width: 100%; min-width: 0; overflow-x: auto; }
+.vz-input-summary:has(.vz-input-feeds) { grid-template-columns: max-content max-content; }
+.vz-input-summary > span:first-child { grid-area: 1 / 1; white-space: nowrap; }
+.vz-input-feeds { grid-area: 1 / 2; white-space: nowrap; }
 .vz-input-summary > [role="status"] { font: 12px/16px system-ui; }
-.vz-input-activity { order: 1; flex: 1 0 100%; min-width: 0; color: var(--foreground-mid); }
-.vz-input-feeds { margin-inline-start: auto; }
+/* Loading text gets its own row, but cannot set the count/feed width floor. */
+.vz-input-activity { grid-column: 1 / -1; grid-row: 2; contain: inline-size; min-width: 0; color: var(--foreground-mid); }
 .vz-input-feeds .tabs { overflow: visible; }
 .vz-input-source-panel { position: relative; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .vz-input-status { margin: 6px 0; }

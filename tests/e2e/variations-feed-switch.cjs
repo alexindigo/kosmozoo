@@ -114,6 +114,9 @@ const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
     await feed('output'); await waitName(NAME); assert.equal(await evaluate(`document.querySelector(${JSON.stringify(option(NAME))}).getAttribute('aria-selected')`), 'true');
     // Narrow geometry uses the real intrinsic footer, plus presentation-only large-count probes.
     const countText = await evaluate(`document.querySelector('.vz-input-summary [role=status]').textContent`);
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 270, height: 1000, deviceScaleFactor: 1, mobile: false });
+    await page.poll(`document.querySelector('.vz-input-popover').getBoundingClientRect().right<=innerWidth+1`);
+    geometryResults.push({ viewport: 270, actualCount: true, ...await checkGeometry() });
     for (const count of [1, 80, 999]) for (const width of [380, 270, 250, 210]) {
       // Typography/allocation probe only: selection behavior is exercised separately.
       await evaluate(`document.querySelector('.vz-input-summary [role=status]').textContent=${JSON.stringify(count + ' selected')}`);
@@ -125,6 +128,9 @@ const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
     await evaluate(`document.querySelector('.vz-input-summary [role=status]').textContent=${JSON.stringify(countText)}`);
     await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
     await page.poll(`document.querySelector('.vz-input-popover').getBoundingClientRect().width>300`);
+    const restoredGeometry = await checkGeometry();
+    assert.equal(restoredGeometry.popupWidth, geometryResults[0].popupWidth, 'intrinsic footer sizing does not retain a previous viewport allocation');
+    geometryResults.push({ viewport: 1400, restored: true, ...restoredGeometry });
     // Discard suspension retains this exact root/search/DOM and resumes focus/caret.
     await page.clickAt('.vz-input-search'); await evaluate(`(()=>{const s=document.querySelector('.vz-input-search');s.setSelectionRange(2,4);return true})()`);
     await evaluate(`(async()=>{${KZ}.handles.invoke('variations.close');return true})()`); await page.poll(`!!document.querySelector('.vz-discard')&&!document.querySelector('.vz-input-popover:popover-open')`);

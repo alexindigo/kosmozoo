@@ -195,9 +195,9 @@ function InputOptions(props) {
         const style = getComputedStyle(panel), list = getComputedStyle(scrollElement);
         const horizontalChrome = ["paddingLeft", "paddingRight", "borderLeftWidth", "borderRightWidth"].reduce((sum, key) => sum + (parseFloat(style[key]) || 0), 0);
         const gridWidth = Number(style.getPropertyValue("--vz-input-columns")) * (TILE_SIZE + GAP) - GAP;
-        // Footer text fits the allocation; a width already derived from this
-        // popup cannot become its own preferred-width input on a later measure.
-        const width = gridWidth + horizontalChrome + scrollElement.offsetWidth - scrollElement.clientWidth, listHeight = parseFloat(list.maxHeight);
+        // The footer owns an intrinsic count/feed track, independent of the
+        // popup's allocation. Its scroll width also survives viewport clipping.
+        const width = Math.max(gridWidth + scrollElement.offsetWidth - scrollElement.clientWidth, summary.scrollWidth) + horizontalChrome, listHeight = parseFloat(list.maxHeight);
         if (!Number.isFinite(width) || !Number.isFinite(listHeight)) return null;
         const chrome = search.getBoundingClientRect().height + summary.getBoundingClientRect().height + (tabs?.getBoundingClientRect().height ?? 0) + (parseFloat(style.rowGap) || 0) * (tabs ? 2 : 1) + ["paddingTop", "paddingBottom", "borderTopWidth", "borderBottomWidth", "rowGap"]
           .reduce((sum, key) => sum + (parseFloat(style[key]) || 0), 0);
