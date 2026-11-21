@@ -505,6 +505,9 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .statuschip.error { color: var(--negative); border-left-color: var(--error); }
 .statuschip.warning { color: var(--warning); border-left-color: var(--warning); }
 .statuschip.statuschip-static { cursor: default; }
+.statuschip { display: flex; align-items: center; gap: 10px; }
+.statuschip-message { min-width: 0; overflow-wrap: anywhere; }
+.statuschip-action { flex: none; white-space: nowrap; }
 
 /* --- the modal contract : ONE backdrop + panel pair. Every modal
  renders .modal-backdrop/.modal-panel (Modal.tsx portals them to body);

@@ -75,13 +75,12 @@ export function registerCoreCommands(handles, { ops, state, clipboard = copyText
     execute(a) {
       const snapshot = resolveIds(a);
       if (a.id || a.target === "current") return snapshot.length ? ops.judgments.dispatch(snapshot[0], a.intent) : false;
-      const tasks = snapshot.map((id) => ops.judgments.dispatch(id, a.intent));
-      return Promise.all(tasks).then((results) => {
+      return ops.judgments.dispatchMany(snapshot, a.intent).then((results) => {
         if (a.target === "selected") {
           const count = results.filter((result) => result.ok).length;
           const patch = a.intent.patch ?? {};
           const label = patch.vote ? patch.vote === "up" ? "up-voted" : "down-voted" : patch.bookmark ? "bookmarked" : "favorited";
-          if (count) ops.status.info(`${count} image${count > 1 ? "s" : ""} ${label}`);
+          if (count && patch.vote !== "down") ops.status.info(`${count} image${count > 1 ? "s" : ""} ${label}`);
         }
         return results;
       });
@@ -207,6 +206,7 @@ export function commandFacades(handles, ops, state) {
     toggleReveal: () => invoke("preference.revealDown"), toggleHideUp: () => invoke("preference.hideUp"),
     setDownvoteHides: (value) => invoke("preference.downvoteHides", { value }),
   });
+  delete facade.judgments.dispatchMany;
   Object.assign(facade.bulk, {
     clear: () => invoke("selection.clear"),
     vote: (vote) => invoke("judgment.apply", { target: "selected", intent: { type: "set", patch: { vote } } }),

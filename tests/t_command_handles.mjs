@@ -370,11 +370,17 @@ Deno.test("judgment current target: resolves once and returns the original singu
 Deno.test("selected judgment status names bookmarks independently of favorites and votes", async () => {
   const handles = makeCommandHandles(), messages = [];
   const state = { images: [{ id: "h:a.png" }, { id: "h:b.png" }], selected: { "h:a.png": true, "h:b.png": true } };
-  registerCoreCommands(handles, { state, ops: { diff: {}, judgments: { dispatch: () => Promise.resolve({ ok: true }) }, status: { info: text => messages.push(text) } } });
-  for (const [patch, label] of [[{ bookmark: true }, "bookmarked"], [{ favorite: true }, "favorited"], [{ vote: "up" }, "up-voted"], [{ vote: "down" }, "down-voted"]]) {
+  const batches = [];
+  registerCoreCommands(handles, { state, ops: { diff: {}, judgments: { dispatchMany: (ids, intent) => {
+    batches.push({ ids, intent }); return Promise.resolve(ids.map(() => ({ ok: true })));
+  } }, status: { info: text => messages.push(text) } } });
+  for (const [patch, label] of [[{ bookmark: true }, "bookmarked"], [{ favorite: true }, "favorited"], [{ vote: "up" }, "up-voted"]]) {
     await handles.invoke("judgment.apply", { target: "selected", intent: { type: "set", patch } });
     assertEquals(messages.at(-1), `2 images ${label}`);
   }
+  await handles.invoke("judgment.apply", { target: "selected", intent: { type: "set", patch: { vote: "down" } } });
+  assertEquals(messages.length, 3, "the judgment owner's actionable toast is the only down-vote report");
+  assertEquals(batches.at(-1), { ids: ["h:a.png", "h:b.png"], intent: { type: "set", patch: { vote: "down" } } });
 });
 
 Deno.test("command data: accessor, symbol, hidden callback and sparse/cyclic records reject before execution", () => {

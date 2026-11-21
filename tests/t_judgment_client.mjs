@@ -493,6 +493,108 @@ function writerFor(entryFor, write = async () => ({})) {
   return makeJudgments({ entryFor, write, apply() {}, onError() {} });
 }
 
+for (const vote of [null, "up"]) {
+  Deno.test(`down-vote Undo: restores ${vote ?? "none"} without changing other judgments`, async () => {
+    await withStore(async ({ store }) => {
+      const id = "h:a.png";
+      await store.actions.judgments.setVote(id, "down");
+      const chip = store.state.chips.find(c => c.action);
+      assert(chip.msg.includes("Down-voted a.png (hidden)"));
+      assertEquals(chip.action, { label: "Undo", ariaLabel: "Undo down-vote" });
+      assertEquals(store.state.images[0].judgment.vote, "down");
+      await store.actions.status.run(chip.slot);
+      const expected = { ...initial };
+      if (vote == null) delete expected.vote; else expected.vote = vote;
+      assertEquals(store.state.images[0].judgment, expected);
+      assert(!store.state.chips.some(c => c.action));
+      assertEquals(store.actions.status.run(chip.slot), undefined, "action is one-shot");
+    }, { ...initial, vote });
+  });
+}
+
+Deno.test("down-vote Undo: one bulk toast restores each successful entry's own vote", async () => {
+  await withStore(async ({ store }) => {
+    await store.actions.judgments.setVote("h:a.png", null);
+    for (const image of store.state.images) store.actions.selected.set(image.id, true);
+    await store.actions.bulk.vote("down");
+    const chips = store.state.chips.filter(c => c.action);
+    assertEquals(chips.length, 1);
+    assertEquals(chips[0].msg, "Down-voted 2 images (hidden)");
+    await store.actions.status.run(chips[0].slot);
+    assertEquals(store.state.images.map(im => im.judgment.vote), [undefined, "up"]);
+  });
+});
+
+Deno.test("down-vote Undo: separate events are independent; repeated down sets and toggle-off are quiet", async () => {
+  await withStore(async ({ store }) => {
+    await store.actions.judgments.setVote("h:a.png", "down");
+    await store.actions.judgments.setVote("h:a.png", "down");
+    await store.actions.judgments.setVote("h:b.png", "down");
+    const chips = store.state.chips.filter(c => c.action);
+    assertEquals(chips.length, 2);
+    await store.actions.status.run(chips[0].slot);
+    assertEquals(store.state.images.map(im => im.judgment.vote), ["up", "down"]);
+    await store.actions.judgments.dispatch("h:b.png", { type: "toggle", field: "vote", value: "down" });
+    assertEquals(store.state.chips.filter(c => c.action).length, 1);
+  });
+});
+
+Deno.test("down-vote Undo: failure never offers an action; partial bulk restores successful members only", async () => {
+  await withStore(async ({ store }) => {
+    const calls = [];
+    api.setJudgment = async (_host, file, patch) => {
+      calls.push([file, patch]);
+      if (file === "b.png") throw Error("rejected");
+      return {};
+    };
+    await store.actions.judgments.setVote("h:b.png", "down");
+    assert(!store.state.chips.some(c => c.action));
+    for (const image of store.state.images) store.actions.selected.set(image.id, true);
+    await store.actions.bulk.vote("down");
+    const chip = store.state.chips.find(c => c.action);
+    assertEquals(chip.msg, "Down-voted a.png (hidden)");
+    await store.actions.status.run(chip.slot);
+    assertEquals(calls.at(-1), ["a.png", { vote: "up" }]);
+    assertEquals(store.state.images.map(im => im.judgment.vote), ["up", "up"]);
+  });
+});
+
+Deno.test("down-vote Undo: captured origin survives navigation; late success after disposal has no action", async () => {
+  await withStore(async ({ store, requests, holdWrites }) => {
+    const calls = [];
+    api.setJudgment = async (host, file, patch) => { calls.push([host, file, patch]); return {}; };
+    await store.actions.judgments.setVote("h:a.png", "down");
+    const chip = store.state.chips.find(c => c.action);
+    await store.actions.hosts.select("other");
+    await store.actions.status.run(chip.slot);
+    assertEquals(calls.at(-1), ["h", "a.png", { vote: "up" }]);
+    assertEquals(store.state.images[0].judgment, initial);
+    holdWrites();
+    const late = store.actions.judgments.setVote("other:a.png", "down");
+    await tick();
+    store.dispose();
+    requests[0].resolve({});
+    await late;
+    assert(!store.state.chips.some(c => c.action));
+  });
+});
+
+Deno.test("down-vote Undo: dismissal and consumed actions reclaim captured writer records", async () => {
+  let entry = { host: "h", filename: "a.png", judgment: {} }, event;
+  const writer = makeJudgments({ entryFor: () => entry, apply(_id, patch) { Object.assign(entry.judgment, patch); },
+    write: async () => ({}), onError() {}, onDownVote(value) { event = value; } });
+  await writer.dispatch("h:a.png", set("vote", "down"));
+  assertEquals(writer.size, 1);
+  event.dispose();
+  assertEquals(writer.size, 0);
+  assertEquals(await event.undo(), []);
+  await writer.dispatch("h:a.png", set("vote", "up"));
+  await writer.dispatch("h:a.png", set("vote", "down"));
+  await event.undo();
+  assertEquals(entry.judgment.vote, "up");
+  assertEquals(writer.size, 0);
+});
+
 Deno.test("judgment lifecycle: completed records reclaimed, independent of total entries judged", async () => {
   const writer = writerFor((id) => ({ id, host: "h", filename: id, judgment: initial }));
   for (let i = 0; i < 100; i++) {

@@ -812,6 +812,13 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
     entryFor: (id) => st.images[imageIdx(id)],
     write: (collection, filename, patch) => api.setJudgment(collection, filename, patch),
     onError: (message) => actions.status.error(message),
+    onDownVote(event) {
+      if (disposed) { event.dispose(); return; }
+      const subject = event.entries.length === 1 ? event.entries[0].filename : `${event.entries.length} images`;
+      actions.status.action(`Down-voted ${subject}${st.judgmentPrefs.downvoteHides ? " (hidden)" : ""}`, {
+        label: "Undo", ariaLabel: "Undo down-vote", invoke: event.undo, dispose: event.dispose,
+      }, 5000);
+    },
     apply(id, patch) {
       const idx = imageIdx(id);
       if (idx < 0 || !Object.keys(patch).length) return;
@@ -1395,6 +1402,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
 
   // --- status-stack helpers ------------------------------------------------------
   const chipTimers = { transient: 0 };
+  const chipActions = new Map();
   let errSeq = 0;
 
   // --- keymap ------------------------------------------------------------------------
@@ -1695,6 +1703,9 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
   function dispose() {
     if (disposed) return;
     disposed = true;
+    for (const slot of Object.keys(chipTimers)) clearTimeout(chipTimers[slot]);
+    for (const action of chipActions.values()) action.dispose?.();
+    chipActions.clear();
     exposure.dispose(); faviconGeneration++; faviconOwner?.dispose(); faviconOwner=null;
     resolveMembership();
     runtimeIdentity.dispose();
@@ -2049,6 +2060,7 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
 
     judgments: {
       dispatch: judgments.dispatch,
+      dispatchMany: judgments.dispatchMany,
       setVote(id, vote) { return actions.judgments.dispatch(id, { type: "set", patch: { vote } }); },
       toggleFavorite(id) { return actions.judgments.dispatch(id, { type: "toggle", field: "favorite" }); },
       toggleBookmark(id) { return actions.judgments.dispatch(id, { type: "toggle", field: "bookmark" }); },
@@ -2521,6 +2533,24 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         clearTimeout(chipTimers.transient);
         chipTimers.transient = setTimeout(() => actions.status.dismiss("transient"), 6000);
       },
+      action(msg, action, duration) {
+        const slot = `action-${++errSeq}`;
+        chipActions.set(slot, action);
+        setSt("chips", chips => [...chips, { slot, kind: "info", msg,
+          action: { label: action.label, ariaLabel: action.ariaLabel } }]);
+        chipTimers[slot] = setTimeout(() => actions.status.dismiss(slot), duration);
+        return slot;
+      },
+      run(slot) {
+        const action = chipActions.get(slot);
+        if (!action) return;
+        // Consume before invoking: a double activation cannot repeat the effect.
+        chipActions.delete(slot);
+        const result = action.invoke();
+        actions.status.dismiss(slot);
+        action.dispose?.();
+        return result;
+      },
       active(slot, msg) {
         setSt("chips", (chips) => {
           const rest = chips.filter((c) => c.slot !== slot);
@@ -2533,12 +2563,14 @@ export function makeAppStore({ subscribeSources = typeof window !== "undefined" 
         return slot;
       },
       clear(slot) {
-        setSt("chips", (chips) => chips.filter((c) => c.slot !== slot));
-        if (slot === "transient") clearTimeout(chipTimers.transient);
+        actions.status.dismiss(slot);
       },
       dismiss(slot) {
         setSt("chips", (chips) => chips.filter((c) => c.slot !== slot));
-        if (slot === "transient") clearTimeout(chipTimers.transient);
+        clearTimeout(chipTimers[slot]);
+        delete chipTimers[slot];
+        chipActions.get(slot)?.dispose?.();
+        chipActions.delete(slot);
       },
     },
 

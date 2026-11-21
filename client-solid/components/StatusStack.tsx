@@ -16,7 +16,13 @@ function StatusChip(props) {
       title={props.onDismiss ? "click to dismiss" : undefined}
       onClick={props.onDismiss}
       role={props.role}
-    >{props.msg}</div>
+    >
+      <span class="statuschip-message">{props.msg}</span>
+      <Show when={props.action}>
+        {action => <button type="button" class="btn statuschip-action" aria-label={action().ariaLabel}
+          onClick={event => { event.stopPropagation(); props.onAction(); }}>{action().label}</button>}
+      </Show>
+    </div>
   );
 }
 
@@ -26,7 +32,9 @@ export function StatusStack() {
     <div id="statusStack">
       <For each={store.state.chips}>
         {(chip) => (
-          <StatusChip kind={chip.kind} msg={chip.msg} onDismiss={() => store.actions.status.dismiss(chip.slot)} registerOccluder={store.actions.feed.occluder} />
+          <StatusChip kind={chip.kind} msg={chip.msg} role="status" action={chip.action}
+            onAction={() => store.actions.status.run(chip.slot)}
+            onDismiss={() => store.actions.status.dismiss(chip.slot)} registerOccluder={store.actions.feed.occluder} />
         )}
       </For>
       <Show when={store.state.inventory.skipped?.count}>
