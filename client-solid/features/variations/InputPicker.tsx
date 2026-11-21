@@ -15,6 +15,7 @@ import { sameOrigin } from "/shared/source-origin.mjs";
 import { ProblemFeedback } from "./ProblemFeedback.js";
 import { variationProblem, problemText } from "/shared/features/variations/problems.mjs";
 import { scrollSample, lookaheadBand, lookaheadRange, demandOrder, demandRank, VELOCITY_IDLE_MS } from "./lookahead.js";
+import { pickerJudgments } from "./picker-judgments.js";
 
 const TILE_SIZE = 96, GAP = 6, ROW_HEIGHT = TILE_SIZE + GAP;
 
@@ -27,10 +28,11 @@ export function InputPicker(props) {
   const [open, setOpen] = createSignal(false), [query, setQuery] = createSignal("");
   const [activeSource, setActiveSource] = createSignal(props.sources[0].source);
   const [resourceRoot, setResourceRoot] = createSignal(props.roots?.[0]?.value ?? null);
+  const [judgments, setJudgments] = createSignal({});
   const source = createMemo(() => props.sources.find(origin => origin.source === activeSource()) ?? props.sources[0]);
   const search = () => props.remoteSearch ? query().trim() : "";
   createEffect(() => { if (open()) props.onSource(source(), resourceRoot(), search()); });
-  const catalogue = () => props.sourceInputs(source(), resourceRoot(), search());
+  const catalogue = () => props.sourceInputs(source(), resourceRoot(), search(), judgments());
   const [suspended, setSuspended] = createSignal(false);
   const id = `vz-image-input-${createUniqueId().replace(/[^\w-]/g, "")}`;
   let root, trigger, surface = null, requestPlacement = () => {};
@@ -87,6 +89,7 @@ export function InputPicker(props) {
       <InputOptions id={id} query={query} onQuery={setQuery} files={catalogue().files} totalSelected={props.totalSelected} parameterLabel={props.parameterLabel}
         context={JSON.stringify([source(), resourceRoot(), search()])} resourceRoot={resourceRoot()} onRoot={setResourceRoot}
         roots={props.roots} noun={props.noun(resourceRoot())} remoteSearch={!!props.remoteSearch}
+        judgments={judgments()} onJudgment={name => setJudgments(value => ({ ...value, [name]: !value[name] }))}
         itemLabel={name => props.itemLabel?.(source(), name) ?? name}
         onMore={() => props.onMore?.(source(), resourceRoot(), search())}
         onGeometry={() => requestPlacement()}
@@ -212,7 +215,7 @@ function InputOptions(props) {
   });
   const move = event => {
     if (event.target.closest?.('[role=tablist]')) return;
-    if (event.target.closest?.(".vz-thumbnail-retry")) return;
+    if (event.target.closest?.(".vz-thumbnail-retry, .vz-input-filters")) return;
     if (!["ArrowLeft", "ArrowRight", "ArrowDown", "ArrowUp", "Enter"].includes(event.key)) return;
     event.preventDefault();
     if (event.key === "Enter") { const name = filtered()[active()]; if (name) props.onToggle(name); }
@@ -244,12 +247,21 @@ function InputOptions(props) {
           registerKeys={props.registerTabKeys} rememberFocus={rememberFocus} />
       </div>
     </Show>
-    <TextField ref={search} type="search" role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls={`${props.id}-list`}
+    <div class="vz-input-toolbar">
+      <Show when={props.roots}><div class="vz-input-filters" role="group" aria-label="Judgment filters">
+        <For each={pickerJudgments}>{filter => <IconButton chrome size="md" variant={`plain vz-input-filter is-${filter.name}`}
+          active={!!props.judgments[filter.name]} disabled={props.resourceRoot !== "output"}
+          aria-label={filter.label} title={props.resourceRoot === "output" ? filter.label : "Input files have no votes"}
+          onFocus={focusMemory(rememberFocus).onFocus} onAction={() => props.onJudgment(filter.name)}
+          icon={'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="5" /></svg>'} />}</For>
+      </div></Show>
+      <TextField ref={search} type="search" role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls={`${props.id}-list`}
       aria-activedescendant={placement() && filtered().length ? `${props.id}-option-${active()}` : undefined}
       class="vz-input-search" placeholder={`Search ${props.noun}...`} aria-label={`Search ${props.noun}`}
       {...focusMemory(rememberFocus)} value={props.query()} onInput={e => props.onQuery(e.currentTarget.value)}
       trailing={<Show when={props.query()}><IconButton chrome size="md" variant="plain vz-search-clear" title="Clear search"
         icon={iconSvg("x")} onAction={() => { props.onQuery(""); search.focus(); }} /></Show>} />
+    </div>
     <div class="vz-input-source-panel" id={`${props.id}-source-panel`} role="tabpanel"
       aria-labelledby={[props.sources.length > 1 ? `${props.id}-tab-${encodeURIComponent(props.source.source)}` : "", props.roots ? `${props.id}-feed-${props.resourceRoot}` : ""].filter(Boolean).join(" ") || undefined}
       aria-label={props.sources.length > 1 || props.roots ? undefined : `${sourceLabel()} ${props.noun}`}>
@@ -302,7 +314,8 @@ function InputOptions(props) {
         <button type="button" class="vz-thumbnail-retry" onClick={props.onRetrySource}>Retry</button>
       </div>
       <Show when={!filtered().length && !props.catalogue.pending && !props.catalogue.error}><p class="vz-image-empty">{
-        props.catalogue.searchOnly ? `Search to find ${props.noun} on ${sourceLabel()}.`
+        props.resourceRoot === "output" && pickerJudgments.some(filter => props.judgments[filter.name]) ? "No images match the selected filters"
+        : props.catalogue.searchOnly ? `Search to find ${props.noun} on ${sourceLabel()}.`
         : (props.remoteSearch ? props.query().trim() : files().length) ? `No ${props.noun} match "${props.query().trim()}".` : `No ${props.noun} available.`}</p></Show>
     </div>
     </div>

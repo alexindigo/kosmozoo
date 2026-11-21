@@ -457,7 +457,7 @@ function ModalBody(props) {
                         onToggleTarget={() => editor.toggleTargetImage(id)}
                         targetThumbnail={targetThumbnail} archiveThumbnail={services.historyThumbnail}
                         thumbnail={(name, root = "input") => services.inputThumbnail(image.host, name, image.origin, root)}
-                        sources={inputSources()} sourceInputs={(origin, root) => read(() => editor.sourceInputs(origin, root))}
+                        sources={inputSources()} sourceInputs={(origin, root, _query, filters) => read(() => editor.sourceInputs(origin, root, filters))}
                         onSource={(origin, root) => editor.loadSourceInputs(origin, false, root)} onRetrySource={(origin, root) => editor.loadSourceInputs(origin, true, root)}
                         inputState={(origin, name, root) => read(() => editor.sourceInputState(id, origin, name, root))}
                         onToggleInput={(origin, name, root) => editor.toggleSourceInput(id, origin, name, root)}

@@ -22,6 +22,7 @@ import { makeProblemOwner } from "./problem-presentation.js";
 import { staleSource, sourceFailure } from "./source-message.js";
 import { judgmentVisible } from "/js/image-visibility-model.mjs";
 import { judgmentMarkers } from "../../store/card-state.js";
+import { matchesPickerJudgments } from "./picker-judgments.js";
 import { isEntryLeaf } from "/shared/entry-path.mjs";
 import { makeVariationRecipe, validRecipeValue as validValue, freezeRecipe as freeze, moveRecipeImage, recipeField } from "./recipe.js";
 export { RECIPE_FIELDS as EDITOR_FIELDS } from "./recipe.js";
@@ -532,17 +533,21 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
     },
     ready: () => catalogueReady,
     sourceProblem() { const target = selectedTargets.find(target => !originCurrent(target)); return target ? staleSource(target.host) : null; },
-    sourceInputs(origin, root = "input") {
+    sourceInputs(origin, root = "input", filters = {}) {
       const record = sourceRecord(inputCatalogues, origin, null, root);
       if (!record) return { files: [], pending: false, error: "" };
       // Readonly discovery reprojects retained facts through the live injected
       // authority. It never edits the recipe or the independent input evidence.
       let files = record.files;
+      let visible = files.length;
       const markers = new Map();
       if (root === "output") {
+        visible = 0;
         const eligible = record.entries.filter(entry => {
           const candidate = services.outputCandidate?.(origin, entry) ?? { judgment: entry.judgment, visible: judgmentVisible(entry.judgment) };
           if (!candidate.visible) return false;
+          visible++;
+          if (!matchesPickerJudgments(candidate.judgment, filters)) return false;
           markers.set(entry.name, judgmentMarkers(candidate.judgment));
           return true;
         }).map(entry => entry.name);
@@ -551,9 +556,9 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
           record.eligible = Object.freeze(eligible);
         files = record.eligible;
       }
-      const listed = record.listed ?? files.length, invalid = record.invalid ?? 0, hidden = Math.max(0, listed - invalid - files.length);
+      const listed = record.listed ?? visible, invalid = record.invalid ?? 0, hidden = Math.max(0, listed - invalid - visible);
       const notices = hidden || invalid ? [variationProblem("listing-filtered", { severity: "warning", phase: "acquisition", source: origin.source, root,
-        numbers: { visible: files.length, listed, hidden, invalid } })] : [];
+        numbers: { visible, listed, hidden, invalid } })] : [];
       return { files, markers, pending: record.pending, error: record.error, loaded: record.loaded, notices };
     },
     async loadSourceInputs(origin, retry = false, root = "input") {
