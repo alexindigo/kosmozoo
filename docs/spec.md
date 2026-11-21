@@ -412,6 +412,20 @@ visually but remains complete in the DOM, native title and polite live region;
 catalogue Retry remains available. The summary body scrolls independently in
 short viewports. These presentation slots do not change preview or Run admission.
 
+The feature's shared `problems.mjs` contract retains a stable code, severity,
+phase, target/parameter identity, numeric and effect facts, message and recovery
+action. HTTP errors and partial successful envelopes preserve that structure
+alongside legacy strings. One editor-owned projection supplies summary, field
+and target feedback; current blockers precede prior Run results and warnings.
+Problem updates invalidate editor derivations before publishing, and changing
+the surviving cohort retires its count plan before any synchronous publication.
+History projects confirmed, partial, unknown, unsent and body-written counts
+from the current permutation journal, not an optimistic or saved summary count.
+Body-written progress alone never confirms queue acceptance or permits replay.
+Count-only pending-upload identities never become output filenames. The naming
+example projects those identities to a display placeholder, while actual graph
+writes and final output validation retain receipt-backed resource names.
+
 #### Run destination ("Run on")
 
 The dialog header is one row: title, the recall dropdown (flexible width), the
@@ -1370,22 +1384,28 @@ feed's filename/parameter filter or selected folder. Input-root resources never
 inherit an output's judgment by name or bytes. Hiding candidates never removes
 chosen image-set items, captured targets or saved-run resources, or changes their
 counts; cached catalogues reproject without refetching or editing the recipe.
+Visible generated candidates show decorative up-voted, starred and bookmarked
+dots in that order with no gaps, using the feed colors and exact same-source optimistic
+judgments; other sources use their own catalogue facts. Their accessible names
+include the markers. Input-root candidates never inherit output markers.
 
-Each Load Image row owns one ordered image set, initially empty. Existing ComfyUI
-input names, native browser Files and engine-host image paths can be added over multiple turns and mixed;
-identity deduplication uses input name, exact File identity or absolute engine path, never filename-only
+Each Load Image row owns one ordered image set, seeded with its exact recorded
+current resource while the parameter stays off. Existing ComfyUI root-qualified
+references, native browser Files and engine-host image paths can be added over multiple turns and mixed;
+identity deduplication uses root/name, exact File identity or absolute engine path, never filename-only
 deduplication of Files. Removal changes that same set. Each chosen tile reserves
 one comparison-status line, so pending/current/ready/error settlement cannot move
 the acquisition controls. Single-line statuses retain full native tooltips. The chosen thumbnail grid
 is above persistent acquisition controls inside the explicitly added card. Turning
 the axis off hides its card without discarding the ordered set. "ComfyUI
 inputs" opens a searchable, virtualized, multi-select list; arrows/Enter select
-and Escape closes its owned popup before the modal. The input grid mounts three
-extra rows on each side to acquire thumbnails before visibility, and declares one
-further viewport in the scroll direction as background image demand. Search, close
-and range changes retire obsolete demand. Visible/three-row-ahead thumbnails and
-the chosen grid register foreground displays of the Store's one acquisition policy;
-further directional rows use its background ceiling and low browser priority,
+and Escape closes its owned popup before the modal. The input grid mounts 15
+lookahead tiles on each side, rounded up to whole rows. Smoothed travel velocity
+extends only the travel side by half a second of rows, capped at 90 tiles; stopped
+motion returns to the base band within 300 ms. Search, close and range changes
+retire obsolete demand. Visible thumbnails and the chosen grid register foreground
+displays of the Store's one acquisition policy; lookahead uses its existing
+two-slot background image lane and low browser priority,
 retaining their native lifetime as they move into view. Both share its image
 and app-origin capacity, preserving the reserved metadata connection, and decode
 asynchronously. A source change does not retire them, their owner's
@@ -1399,7 +1419,22 @@ timer. All client entry paths (including input listing/upload, thumbnails, Detai
 feed and HEAD requests) use the shared entry URL serializer. Raw names are encoded
 exactly once; Comfy listing annotations are removed only at ingress. The engine's
 Comfy view URL owner separately encodes its filename/subfolder query contract.
-“Add files…” uses the browser's multi-file picker;
+Picked tiles offer quarter-turn rotation, clockwise normally and counterclockwise
+while Alt/Option is held. Turns compose from the original bytes, replacing the
+tile in place with an ordinary `<stem>_r<degrees>.png` File; a full turn restores
+the exact original item. Read/encode settlement is editor-membership-fenced.
+Target-relative Current image tiles have no rotation action. Upload, archive,
+comparison, naming and Run use the same resulting File lane as ordinary picks.
+
+Holding Space over a chosen or picker image peeks at it above the dialog and
+popup without changing focus, scroll, selection or recipe. Dispatcher admission
+declines text-entry focus and empty hover; the active peek owns Space release
+and blur. One pointer-transparent view animates uniformly from the tile to a
+margin-fitted viewport box and back, with reduced-motion show/hide. A decoded
+thumbnail remains until its full image or replacement decodes, and both use the
+shared foreground display owner. Dialog disposal retires the whole peek lifetime.
+
+"Add files..." uses the browser's multi-file picker;
 there is no browser-directory input or mutually exclusive image mode.
 The persistent “Folder on the engine computer” path field and “Add folder” action recursively acquire engine-host
 images, including subfolders. The feature filesystem owner skips symlink traversal,
@@ -1739,7 +1774,9 @@ Explicit candidates require text and retain the original directory exactly; inva
 paths or candidates requiring truncation reject the whole plan before enqueue,
 without sanitizing or dropping path text. Root empty and whitespace candidates remain
 exact during preliminary validation. Every final composed output name, after manual
-affixes and automatic naming, must pass the shared entry-path grammar; an empty
+affixes and automatic naming, must pass `isCreatedEntryPath`: the shared relative
+address grammar plus rejection of control characters. Listed resource names
+still retain their exact control characters. An empty
 candidate is allowed only when its final composition is valid. Invalid final names
 reject before any enqueue, including names from the unselected/fallback paths.
 Compositional proof binds the actual candidate, parameter ID, stable node ID
