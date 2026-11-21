@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const { addParameter } = require('./variation-add-helpers.cjs');
+const { addParameter, settledCount } = require('./variation-add-helpers.cjs');
+const { rejectedNumericCapture } = require('./history-fixtures.cjs');
 const { openImageAdd, waitForInputPicker } = require('./image-picker-helpers.cjs');
 module.exports = async ({ page, evaluate, invoke, list, write, panel, waitRun, ENGINE, FAKE, E, scenario, original, shot }) => {
   const originalId = original.id;
@@ -99,14 +100,20 @@ module.exports = async ({ page, evaluate, invoke, list, write, panel, waitRun, E
     await close(); await open('flux-controlnet.png');
     await addParameter(page, '9.denoise'); await page.clickAt('[data-param-key="9.denoise"] .mode-switch button[title="Value"]');
     await write('[data-param-key="9.denoise"] .vz-value-field input', '1e');
-    await page.clickAt('.vz-run'); await page.poll('document.querySelector(".vz-error")?.textContent.includes("number")');
+    await page.poll('document.querySelector(".vz-run")?.disabled&&document.querySelector(".vz-messages")?.textContent.includes("number")');
+    assert.equal((await invoke('variations.run')).status, 'invalid');
+    assert.equal((await list()).items.length, 1, 'invalid UI setup cannot start a capture');
+    const captured = await rejectedNumericCapture(page, originalId);
     const rows = await list(); assert.equal(rows.items.length, 2); assert.equal(rows.items[0].outcome, 'rejected');
+    assert.equal(rows.items[0].id, captured.id);
     const detail = await evaluate(`fetch('/api/features/variations/history/${rows.items[0].id}').then(r=>r.json())`);
-    assert.equal(detail.recipe.numeric['9.denoise'].values.value, '1e'); assert.equal(detail.effects.length, 0);
+    assert.equal(detail.recipe.numeric['9.denoise'].values.value, '1e');
+    assert(detail.effects.every(effect => effect.kind === 'admission'), 'rejected admission has no upload or permutation effects');
     const jobs = await (await fetch(FAKE + '/__test/enqueues')).json(); assert.equal(jobs.length, 1);
     await close(); await panel();
     await page.clickAt(`[data-history-id="${rows.items[0].id}"] .vh-recall`);
-    await page.poll('document.querySelector("[data-param-key=\\"9.denoise\\"] .vz-value-field input")?.value==="1e"');
+    await page.poll('document.querySelector(".vh-panel .vh-error")?.textContent.includes("number")');
+    assert.equal(await page.evaluate('!!document.querySelector(".vz-panel")'), false, 'invalid original opening is refused before replacing a draft');
     fs.writeFileSync(E + '/rejected-attempt.json', JSON.stringify(detail));
     await close();
     for (const [mode, value] of [['uncertain','0.8'],['partial','0.7']]) {
@@ -114,6 +121,7 @@ module.exports = async ({ page, evaluate, invoke, list, write, panel, waitRun, E
       await invoke('variations.history.open',{id:originalId});
       await page.poll('!!document.querySelector(".vz-panel")');
       await write('[data-param-key="9.denoise"] .vz-value-field input',value);
+      await settledCount(page, '1');
       await page.clickAt('.vz-run');
       await page.poll(`fetch('/api/features/variations/history').then(r=>r.json()).then(r=>r.items[0]?.outcome===${JSON.stringify(mode)})`,30000);
       const before=(await(await fetch(FAKE+'/__test/enqueues')).json()).length;

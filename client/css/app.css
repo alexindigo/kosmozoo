@@ -1578,6 +1578,9 @@ body:has(#diff:not([hidden])) #statusCol { bottom: 56px; }
 .vh-menu { margin: 0; padding: 0; border: 1px solid var(--border-strong); border-radius: 6px;
   background: var(--focused-background); color: var(--foreground); box-shadow: 0 8px 24px var(--backdrop); overflow: auto; }
 .vh-menu-label { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.vh-menu:popover-open { display: flex; flex-direction: column; overflow: hidden; }
+.vh-menu > .vh-menu-label, .vh-menu > .vh-status { flex: 0 0 auto; }
+.vh-menu-list { min-height: 0; overflow: auto; }
 .vh-panel { flex: 1; min-height: 0; overflow: auto; background: var(--surface); }
 .vh-panel h2 { margin: 0; padding: 12px; font-size: 13px; font-weight: 500; border-bottom: 1px solid var(--border); }
 .vh-panel .vh-entry { margin: 0 10px; }

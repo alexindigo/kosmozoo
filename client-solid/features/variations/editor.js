@@ -4,7 +4,7 @@ import { snapshotDraft, createRunId } from "./draft.js";
 import { editorDomain, choiceValues, numericDefaults, numericText, sliderNumber } from "./graph.mjs";
 import { parseExactJson, stringifyExactJson, sameJsonValue, resourceReferenceValue, resourceReferenceProblem } from "/shared/parameters.mjs";
 import { admitResourceTransfer } from "/shared/features/variations/compile.mjs";
-import { compileRecipe, compileNumericOperation, parseRecipeCandidate, recipeImageView, currentRoot } from "/shared/features/variations/recipe-compile.mjs";
+import { compileRecipe, compileNumericOperation, parseRecipeCandidate, recipeImageView, previewRecipeNaming, currentRoot } from "/shared/features/variations/recipe-compile.mjs";
 import { acknowledgedHistoryFields, planHistoryOverlay, decodeHistoryRecipe, encodeHistoryRecipe } from "/shared/features/variations/history-codec.mjs";
 import { permutationPlan,
   resolveRelativeRanges, acknowledgedFields, targetRunPlan, catalogueParams, parameterIndex, parameterCurrent, parameterLabel, parameterAliases,
@@ -845,11 +845,11 @@ export function makeVariationEditor({ targets, cohortMode, destination: initialD
         const parameters = namingParameters(first), aliases = parameterAliases(parameters);
         const basename = capturedTargets[0].filename.split("/").pop().replace(/\.[^.]+$/, "");
         const source = first.outputNaming ?? { directory: "", sourceStem: basename };
-        const projection = variationOutputName(source, { ...payload, ranges }, sample, values, aliases, parameters, { sameHost });
+        const projection = variationOutputName(source, { ...payload, ranges }, previewRecipeNaming(sample, compiled), values, aliases, parameters, { sameHost });
          const naming = { complete: projection.complete,
            notices: projection.notices.map(problem => problemFrom({ problem }, { target: targetIdentity(capturedTargets[0]), parameter: { id: "root", label: "Output names" } })),
            problems: projection.problems.map(problem => problemFrom({ problem }, { target: targetIdentity(capturedTargets[0]) })),
-          example: projection.value.replace(/\0pending-\d+/g, "[upload name pending]"),
+           example: projection.value,
           help: "Representative first output; upload collision names and ComfyUI's added counter may differ." };
         const factors = [...axes].sort((a, b) => (a.kind !== "images") - (b.kind !== "images")).map(axis =>
           `${axis.count.toLocaleString("en-US")} ${axis.kind === "images" ? `input image${axis.count === 1 ? "" : "s"}` : `${axis.name} value${axis.count === 1 ? "" : "s"}`}`);

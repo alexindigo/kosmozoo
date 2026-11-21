@@ -36,6 +36,7 @@ async function run({ page, errors, ENGINE, FAKE, E, scenario, phase }) {
     await page.poll(`document.querySelector(${JSON.stringify(selector)}).value===${JSON.stringify(value)}`);
   };
   const waitRun = async () => {
+    await settledCount(page, '1');
     await page.clickAt('.vz-run');
     await page.poll('document.querySelector(".vz-queued")?.textContent.includes("Queued 1 of 1") || !!document.querySelector(".vz-error")?.textContent', 30000);
     const message = await page.evaluate('document.querySelector(".vz-error").textContent');

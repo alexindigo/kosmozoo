@@ -99,7 +99,7 @@ function ModalBody(props) {
   const [historyCaption, setHistoryCaption] = createSignal(original ? `${historyCount(original)} | ${historyDate(original.createdAt)} | ${image.filename}` : "");
   const [recallWarnings, setRecallWarnings] = createSignal([]);
   const [recallStatus, setRecallStatus] = createSignal(null);
-  const [recallNotice, setRecallNotice] = createSignal("");
+  const [recallNotice, setRecallNotice] = createSignal(null);
   let alive = true, recalling = null;
   onCleanup(() => { alive = false; });
   const read = getter => { version(); return getter(); };
@@ -221,22 +221,23 @@ function ModalBody(props) {
   const settleRecall = promise => {
     if (recalling?.promise !== promise) return;
     recalling = null;
+    if (recallNotice()?.owner === promise) setRecallNotice(null);
   };
   const recall = id => {
     if (!alive) return Promise.resolve({ status: "stale" });
     if (recalling) {
       if (recalling.id === id) return recalling.promise;
-      setRecallNotice(problemText(variationProblem("recall-busy", { phase: "recall", current: recalling.id, runId: id })));
+      setRecallNotice({ owner: recalling.promise, text: problemText(variationProblem("recall-busy", { phase: "recall", current: recalling.id, runId: id })) });
       return Promise.resolve({ status: "busy" });
     }
-    setRecallNotice("");
+    setRecallNotice(null);
     const revision = editor.revision();
     const promise = (async () => {
       const saved = await services.history.open(id);
       let transferred = false;
       try {
          if (!alive || guard.pending() || editor.revision() !== revision) {
-           if (alive) setRecallNotice(problemText(variationProblem("recall-changed", { phase: "recall", runId: id })));
+           if (alive) setRecallNotice({ text: problemText(variationProblem("recall-changed", { phase: "recall", runId: id })) });
            return { status: "stale" };
          }
         const plan = await editor.planRecall(saved);
@@ -251,7 +252,7 @@ function ModalBody(props) {
           setRecallWarnings(plan.warnings);
           setRecallStatus(plan.warnings.length || result.status === "unchanged" ? problemText(variationProblem("recall-summary", { phase: "recall", runId: id, numbers: plan.counts })) : null);
         }
-         if (result.status === "stale") setRecallNotice(problemText(variationProblem("recall-changed", { phase: "recall", runId: id })));
+         if (result.status === "stale") setRecallNotice({ text: problemText(variationProblem("recall-changed", { phase: "recall", runId: id })) });
          return result;
       } finally {
         // The transition has settled. Lease cleanup remains owned by the
@@ -415,7 +416,7 @@ function ModalBody(props) {
           <SingleLineText class="vz-title" value="Generate image variations" />
           <HistoryDropdown history={services.history} state={services.historyState} thumbnail={services.historyThumbnail} registerThumbnail={services.registerThumbnail}
             registerPopup={registerImagePopup} registerEditor={registerEditor} rememberFocus={rememberFocus} bulk={batch}
-            caption={historyCaption()} warnings={recallWarnings()} recallStatus={recallStatus()} notice={recallNotice()} onRecall={recall} />
+            caption={historyCaption()} warnings={recallWarnings()} recallStatus={recallStatus()} notice={recallNotice()?.text ?? ""} onRecall={recall} />
            <RunOn destinations={services.runDestinations()} value={destination()?.source ?? ""} offline={host => !store.state.hosts[host]?.online}
              problem={destinationProblem()}
             fixed={running()} onChoose={chooseDestination} focus={focus} />

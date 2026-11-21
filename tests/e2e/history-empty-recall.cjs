@@ -1,16 +1,12 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const { rejectedNumericCapture } = require('./history-fixtures.cjs');
 
 // Real rejected-but-sealed capture, menu transport and retained archive bytes.
 // Only the accepted close clock is held so lease/DOM observations are deterministic.
 module.exports = async ({ page, evaluate, invoke, list, write, close, open, waitRun, choose, originalId, shot, E }) => {
   await close(); await open('flux-controlnet.png');
-  const { addParameter } = require('./variation-add-helpers.cjs');
-  await addParameter(page, '9.denoise');
-  await page.clickAt('[data-param-key="9.denoise"] .mode-switch button[title="Value"]');
-  await write('[data-param-key="9.denoise"] .vz-value-field input', '1e');
-  await page.clickAt('.vz-run');
-  await page.poll('document.querySelector(".vz-error")?.textContent.includes("number")');
+  await rejectedNumericCapture(page, originalId);
   const invalid = (await list()).items.find(row => row.outcome === 'rejected');
   assert(invalid, 'invalid raw capture remains a selectable, sealed record');
   await close();
@@ -47,7 +43,7 @@ module.exports = async ({ page, evaluate, invoke, list, write, close, open, wait
     assert.equal(await page.evaluate('document.querySelector(".vh-trigger").textContent'), caption);
     assert.equal(await page.evaluate('!!document.querySelector(".vz-discard")'), false);
     assert.equal(await page.evaluate('window.recallProof.timers[0].cleared'), false, 'empty recall preserves the accepted close clock');
-    assert.equal(await page.evaluate('document.querySelector(".vz-queued").textContent'), 'Queued 1 of 1 jobs');
+    assert.equal(await page.evaluate('document.querySelector(".vz-queued").textContent'), '1 confirmed, 0 partial, 0 unknown, 0 unsent; 1 sent.');
     const after = await page.evaluate(`({prefix:document.querySelector('.vz-prefix').value,suffix:document.querySelector('.vz-suffix').value,value:document.querySelector('[data-param-key="9.denoise"] .vz-value-field input').value,opened:window.recallProof.opened.slice(),released:window.recallProof.released.slice()})`);
     assert.deepEqual([after.prefix, after.suffix, after.value], [before.prefix, before.suffix, before.value]);
     assert.deepEqual(after.released, [after.opened.at(-1).leaseId], 'release only the empty selection lease');
@@ -91,6 +87,7 @@ module.exports = async ({ page, evaluate, invoke, list, write, close, open, wait
         assert(paused, 'admitted recall reached the real open transport');
         await choose(a);
         assert.equal(await page.evaluate('window.busyProof.calls.length'),callStart+1,'same ID shares admission and one acquisition');
+        await require('./variation-add-helpers.cjs').settledCount(page);
         const untouched = await snapshot();
         await shot('busy-before-' + outcome);
         await choose(b);
@@ -99,7 +96,7 @@ module.exports = async ({ page, evaluate, invoke, list, write, close, open, wait
         assert.equal(await page.evaluate('window.busyProof.calls.length'),callStart+1,'busy B never acquires');
         assert.equal(opens.length,openStart+1);
         const geometry = await page.evaluate(`(()=>{const menu=document.querySelector('.vh-menu:popover-open'),status=menu.querySelector('.vh-status'),label=menu.querySelector('.vh-menu-label'),m=menu.getBoundingClientRect(),s=status.getBoundingClientRect(),l=label.getBoundingClientRect();return {menu:m.toJSON(),status:s.toJSON(),label:l.toJSON(),visible:status.checkVisibility(),top:status.contains(document.elementFromPoint(s.left+s.width/2,s.top+s.height/2)),disabled:menu.querySelectorAll('[disabled]').length}})()`);
-        assert(geometry.visible&&geometry.top&&geometry.status.top>=geometry.label.bottom&&geometry.status.bottom<=geometry.menu.bottom,'notice is visible inside the native popup flow');
+        assert(geometry.visible&&geometry.top&&geometry.status.top>=geometry.label.bottom&&geometry.status.bottom<=geometry.menu.bottom,'notice is visible inside the native popup flow: '+JSON.stringify(geometry));
         assert.equal(geometry.disabled,0);
         await shot('busy-' + outcome);
         if(outcome==='stale') await page.evaluate(`(()=>{window.busyProof.holdRelease=true;const e=document.querySelector('.vz-prefix');e.value='newer_';e.dispatchEvent(new Event('input',{bubbles:true}))})()`);

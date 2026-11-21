@@ -64,6 +64,13 @@ export function previewRecipeUploads(snapshot, lookup, confirmedUploads, target,
   }
   return names;
 }
+// Count-only transfer identities are not filename data. Only the naming display
+// receives this projection; compilation and final writers retain receipt authority.
+export function previewRecipeNaming(sample, compiled) {
+  return Object.fromEntries(Object.entries(sample).map(([id, value]) => [id,
+    compiled.transfers[id]?.length && typeof value === "string" && /^\0pending-\d+$/.test(value)
+      ? "[upload name pending]" : value]));
+}
 export function compileRecipe(snapshot, { catalogue, target, batch = false, lookup = () => undefined,
   uploadReceipts = null, confirmedUploads = new Map(), resourceValues = new Map(), resourceIdentities = null, preview = false }) {
   const bindings = [], uploads = [], uploadHashes = new Map(), ranges = {}, imageParams = {}, transfers = {}, estimates = {};
